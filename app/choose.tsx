@@ -8,7 +8,7 @@ export default function Choose() {
   const cardWidth = width > 400 ? 360 : width - 40;
   const variants = [
     {
-      title: "Decay Chess",
+      title: "Classic Chess",
       description: "Pieces decay after a set number of moves. Adapt your strategy!",
       image: "https://images.chesscomfiles.com/uploads/v1/images_users/tiny_mce/PhilippK/PiecesDecay.png",
     },
@@ -43,7 +43,7 @@ export default function Choose() {
             elevation: 3,
           }}
           activeOpacity={0.85}
-          onPress={() => router.push("/matchmaking")}
+          onPress={() => router.push({ pathname: "/matchmaking", params: { variant: variant.title } })}
         >
           <Image source={{ uri: variant.image }} style={{ width: 80, height: 80, borderRadius: 10, marginBottom: 12, resizeMode: "contain" }} />
           <Text style={{ color: "#00A862", fontSize: 22, fontWeight: "bold", marginBottom: 6, textAlign: "center" }}>{variant.title}</Text>

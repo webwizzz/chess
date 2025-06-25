@@ -1,17 +1,26 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Text, View } from "react-native";
+import { useRouter, useLocalSearchParams } from "expo-router";
 
-export default function MatchMaking({ route }: any) {
-  // You can get the variant from route.params if you want to pass it
+export default function MatchMaking() {
+  const router = useRouter();
+  const { variant } = useLocalSearchParams();
   const [opponent, setOpponent] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
 
   useEffect(() => {
     // Simulate matchmaking delay
     const interval = setInterval(() => setTimer(t => t + 1), 1000);
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       setOpponent("Lader (Opponent)");
       clearInterval(interval);
+      // Simulate session creation
+      await new Promise(res => setTimeout(res, 1000));
+      // After matchmaking and session creation, redirect based on variant
+      if (variant === "Classic Chess") {
+        router.replace("/Classic");
+      }
+      // Add more variants here if needed
     }, 4000); // 4 seconds for demo
     return () => {
       clearTimeout(timeout);
