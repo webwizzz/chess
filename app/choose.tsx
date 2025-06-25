@@ -1,6 +1,6 @@
-import React from "react";
-import { View, Text, TouchableOpacity, Image, Dimensions, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
+import React from "react";
+import { Dimensions, Image, ScrollView, Text, TouchableOpacity } from "react-native";
 
 export default function Choose() {
   const { width } = Dimensions.get("window");

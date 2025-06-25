@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ActivityIndicator, Image } from "react-native";
+import { ActivityIndicator, Image, Text, View } from "react-native";
 
 export default function MatchMaking({ route }: any) {
   // You can get the variant from route.params if you want to pass it
