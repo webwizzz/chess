@@ -13,7 +13,7 @@ export default function Choose() {
       image: "https://images.chesscomfiles.com/uploads/v1/images_users/tiny_mce/PhilippK/PiecesDecay.png",
     },
     {
-      title: "6Pointer Chess",
+      title: "Decay chess",
       description: "Each piece has a point value. Score 6 points to win!",
       image: "https://images.chesscomfiles.com/uploads/v1/images_users/tiny_mce/PhilippK/6Pointer.png",
     },

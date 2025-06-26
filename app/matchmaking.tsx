@@ -19,8 +19,9 @@ export default function MatchMaking() {
       // After matchmaking and session creation, redirect based on variant
       if (variant === "Classic Chess") {
         router.replace("/Classic");
+      } else if (variant === "Decay chess") {
+        router.replace("/Decay");
       }
-      // Add more variants here if needed
     }, 4000); // 4 seconds for demo
     return () => {
       clearTimeout(timeout);
