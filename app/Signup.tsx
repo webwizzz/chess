@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Image, Text, TextInput, TouchableOpacity, View } from "react-native";
@@ -9,13 +11,29 @@ export default function Signup() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     if (password !== confirmPassword) {
       alert("Passwords do not match");
       return;
     }
-    // TODO: Add signup logic
-    alert(`Signup with ${email}`);
+    try {
+      const response = await axios.post('http://localhost:3000/api/auth/register', {
+        name,
+        email,
+        password
+      });
+      if (response.status === 201) {
+        const data = response.data;
+        await AsyncStorage.setItem('token', data.token);
+        await AsyncStorage.setItem('user', JSON.stringify(data.user));
+        router.replace('/choose');
+      } else {
+        alert(response.data.error || 'Registration failed');
+      }
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.error || 'An error occurred. Please try again.';
+      alert(errorMsg);
+    }
   };
 
   return (

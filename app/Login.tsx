@@ -1,16 +1,32 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Text, TextInput, TouchableOpacity, View, Image } from "react-native";
+import { Image, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const router = useRouter();
 
-  const handleLogin = () => {
-    // TODO: Add login logic
-    alert(`Login with ${email}`);
-    router.replace("/choose");
+  const handleLogin = async () => {
+    try {
+      const response = await axios.post('http://localhost:3000/api/auth/login', {
+        email,
+        password
+      });
+      if (response.status === 200) {
+        const data = response.data;
+        await AsyncStorage.setItem('token', data.token);
+        await AsyncStorage.setItem('user', JSON.stringify(data.user));
+        router.replace('/choose');
+      } else {
+        alert(response.data.error || 'Login failed');
+      }
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.error || 'An error occurred. Please try again.';
+      alert(errorMsg);
+    }
   };
 
   return (

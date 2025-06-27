@@ -1,14 +1,19 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from "expo-router";
 import React from "react";
 
 export default function Index() {
   const router = useRouter();
   React.useEffect(() => {
-    // Use setTimeout to ensure navigation happens after mount
-    const timeout = setTimeout(() => {
-      router.replace("/Home");
-    }, 0);
-    return () => clearTimeout(timeout);
+    const checkAuth = async () => {
+      const token = await AsyncStorage.getItem('token');
+      if (token) {
+        router.replace('/choose');
+      } else {
+        router.replace('/Home');
+      }
+    };
+    checkAuth();
   }, [router]);
   return null;
 }

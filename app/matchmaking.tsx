@@ -1,23 +1,82 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ActivityIndicator, Image } from "react-native";
+import { Image, Text, View } from "react-native";
+import { Socket } from "socket.io-client";
+import { getSocketInstance } from "../utils/socketManager";
 
-export default function MatchMaking({ route }: any) {
-  // You can get the variant from route.params if you want to pass it
+export default function MatchMaking({ route, navigation }: any) {
   const [opponent, setOpponent] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    // Simulate matchmaking delay
-    const interval = setInterval(() => setTimer(t => t + 1), 1000);
-    const timeout = setTimeout(() => {
-      setOpponent("Lader (Opponent)");
-      clearInterval(interval);
-    }, 4000); // 4 seconds for demo
-    return () => {
-      clearTimeout(timeout);
-      clearInterval(interval);
-    };
+    // Always get a connected socket instance
+    const existingSocket = getSocketInstance();
+    if (existingSocket) {
+      setSocket(existingSocket);
+      console.log("Using existing socket instance");
+      // Debug: Log socket details
+      console.log("Socket namespace:", existingSocket.nsp);
+      console.log("Socket id:", existingSocket.id);
+      console.log("Socket connected:", existingSocket.connected);
+      // Listen for all events for debugging
+      existingSocket.onAny((event: string, ...args: any[]) => {
+        console.log("[SOCKET EVENT]", event, args);
+      });
+    } else {
+      alert("Connection failed");
+    }
   }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on("queue:matched", (response) => {
+        console.log("Received initialContextResponse:", response);
+        setOpponent(response.opponent.name);
+        setTimer(0); // Reset timer when match is found
+      });
+    socket.on("queue:error", (response) => {
+        console.log("Received initialContextResponse:", response);
+        setOpponent(null);
+        setTimer(0); // Reset timer on error
+        alert(response.error || "An error occurred while matching");
+      });
+
+    return () => {
+      socket.off("queue:matched",  (response) => {
+        console.log("Received initialContextResponse:", response);
+        setOpponent(response.opponent.name);
+        setTimer(0); // Reset timer when match is found
+      });
+      socket.off("queue:error", (response) => {
+        console.log("Received initialContextResponse:", response);
+        setOpponent(null);
+        setTimer(0); // Reset timer on error
+        alert(response.error || "An error occurred while matching");
+      });
+    };
+  }, [socket]);
+
+//  useEffect(() => {
+//     // Simulate matchmaking delay
+//     const interval = setInterval(() => setTimer(t => t + 1), 1000);
+//     const timeout = setTimeout(async () => {
+//       setOpponent("Lader (Opponent)");
+//       clearInterval(interval);
+//       // Simulate session creation
+//       await new Promise(res => setTimeout(res, 1000));
+//       // After matchmaking and session creation, redirect based on variant
+//       // if (variant === "Classic Chess") {
+//       //   router.replace("/Classic");
+//       // } else if (variant === "Decay chess") {
+//       //   router.replace("/Decay");
+//       // }
+//     }, 4000); // 4 seconds for demo
+//     return () => {
+//       clearTimeout(timeout);
+//       clearInterval(interval);
+//     };
+//   }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#23272A", justifyContent: "center", alignItems: "center", padding: 20 }}>
@@ -38,12 +97,12 @@ export default function MatchMaking({ route }: any) {
           <Text style={{ color: opponent ? "#fff" : "#b0b3b8", fontSize: 18, fontWeight: "bold" }}>{opponent || "Searching..."}</Text>
         </View>
       </View>
-      {!opponent && (
+      {/* {!opponent && (
         <View style={{ marginTop: 40, alignItems: "center" }}>
           <ActivityIndicator size="large" color="#00A862" />
           <Text style={{ color: "#b0b3b8", fontSize: 16, marginTop: 12 }}>Finding an opponent... ({timer}s)</Text>
         </View>
-      )}
+      )} */}
       {opponent && (
         <View style={{ marginTop: 40, alignItems: "center" }}>
           <Text style={{ color: "#00A862", fontSize: 20, fontWeight: "bold" }}>Match Found!</Text>

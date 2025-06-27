@@ -1,0 +1,57 @@
+import { io } from "socket.io-client";
+
+let socketInstance = null;
+
+export const getSocket = (
+  userId,
+  connectionType
+) => {
+  if (!socketInstance || !socketInstance.connected) {
+
+    let namespace = "";
+    switch (connectionType) {
+      case "matchmaking":
+        namespace = "/matchmaking";
+        break;
+      default:
+        console.error(`Invalid connection type: ${connectionType}`);
+        return null;
+    }
+
+    const socketUrl = `http://localhost:3000${namespace}`;
+    const socketOptions = {
+      path: "/socket.io",
+      query: { userId },
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    };
+
+    console.log(`Connecting to socket with URL: ${socketUrl}`);
+    socketInstance = io(socketUrl, socketOptions);
+
+    socketInstance.on("connect", () => {
+      console.log(
+        "Socket.IO connection established with ID:",
+        socketInstance.id
+      );
+    });
+
+    socketInstance.on("disconnect", (reason) => {
+      console.log("Socket.IO connection closed. Reason:", reason);
+    });
+  }
+
+  return socketInstance;
+};
+
+export const closeSocket = () => {
+  if (socketInstance) {
+    socketInstance.disconnect();
+    socketInstance = null;
+    console.log("Socket.IO connection closed manually.");
+  }
+};
+
+export const getSocketInstance = () => socketInstance;
