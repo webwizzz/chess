@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { Image, Text, View } from "react-native";
+import { ActivityIndicator, Image, Text, View } from "react-native";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Socket } from "socket.io-client";
 import { getSocketInstance } from "../utils/socketManager";
 
-export default function MatchMaking({ route, navigation }: any) {
+export default function MatchMaking() {
+  const router = useRouter();
+  const { variant } = useLocalSearchParams();
   const [opponent, setOpponent] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
   const [socket, setSocket] = useState<Socket | null>(null);

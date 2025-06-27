@@ -11,11 +11,11 @@ export default function Choose() {
 
   const variants = [
     {
-      title: "Decay Chess",
+      title: "Classic Chess",
       description: "Pieces decay after a set number of moves. Adapt your strategy!",
     },
     {
-      title: "6Pointer Chess",
+      title: "Decay chess",
       description: "Each piece has a point value. Score 6 points to win!",
     },
     {
