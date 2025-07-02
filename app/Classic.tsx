@@ -1,9 +1,9 @@
 "use client"
 
+import { useLocalSearchParams, useRouter } from "expo-router"
 import type React from "react"
-import { useState, useEffect, useCallback } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, SafeAreaView, StatusBar, Alert } from "react-native"
-import { useRouter, useLocalSearchParams } from "expo-router"
+import { useCallback, useEffect, useState } from "react"
+import { Alert, Dimensions, SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 
 // Types
 type PieceType = "king" | "queen" | "rook" | "bishop" | "knight" | "pawn"

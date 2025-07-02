@@ -1,6 +1,6 @@
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Text, View } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
 
 export default function MatchMaking() {
   const router = useRouter();
