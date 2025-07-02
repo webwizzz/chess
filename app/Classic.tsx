@@ -2,7 +2,8 @@
 
 import type React from "react"
 import { useState, useEffect, useCallback } from "react"
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, SafeAreaView, StatusBar } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, SafeAreaView, StatusBar, Alert } from "react-native"
+import { useRouter, useLocalSearchParams } from "expo-router"
 
 // Types
 type PieceType = "king" | "queen" | "rook" | "bishop" | "knight" | "pawn"
@@ -12,6 +13,7 @@ interface ChessPiece {
   type: PieceType
   color: PieceColor
   hasMoved?: boolean
+  id?: string
 }
 
 type Board = (ChessPiece | null)[][]
@@ -28,6 +30,15 @@ interface GameState {
   capturedByBlack: ChessPiece[]
   gameStatus: string
   isGameActive: boolean
+  gameResult: "ongoing" | "white-wins" | "black-wins" | "draw"
+  enPassantTarget: Position | null
+  whiteCanCastleKingside: boolean
+  whiteCanCastleQueenside: boolean
+  blackCanCastleKingside: boolean
+  blackCanCastleQueenside: boolean
+  moveHistory: string[]
+  fiftyMoveCounter: number
+  positionHistory: string[]
 }
 
 // Chess piece symbols
@@ -50,7 +61,10 @@ const PIECE_SYMBOLS: Record<PieceColor, Record<PieceType, string>> = {
   },
 }
 
-// Initial board setup
+// Generate unique ID for pieces
+const generatePieceId = () => Math.random().toString(36).substring(7)
+
+// Initial board setup with unique IDs
 const createInitialBoard = (): Board => {
   const board: Board = Array(8)
     .fill(null)
@@ -58,33 +72,76 @@ const createInitialBoard = (): Board => {
 
   // Place pawns
   for (let col = 0; col < 8; col++) {
-    board[1][col] = { type: "pawn", color: "black" }
-    board[6][col] = { type: "pawn", color: "white" }
+    board[1][col] = { type: "pawn", color: "black", id: generatePieceId() }
+    board[6][col] = { type: "pawn", color: "white", id: generatePieceId() }
   }
 
   // Place other pieces
   const pieceOrder: PieceType[] = ["rook", "knight", "bishop", "queen", "king", "bishop", "knight", "rook"]
 
   for (let col = 0; col < 8; col++) {
-    board[0][col] = { type: pieceOrder[col], color: "black" }
-    board[7][col] = { type: pieceOrder[col], color: "white" }
+    board[0][col] = { type: pieceOrder[col], color: "black", id: generatePieceId() }
+    board[7][col] = { type: pieceOrder[col], color: "white", id: generatePieceId() }
   }
 
   return board
 }
 
+// Convert board to string for position comparison
+const boardToString = (
+  board: Board,
+  currentPlayer: PieceColor,
+  castlingRights: any,
+  enPassant: Position | null,
+): string => {
+  let str = ""
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const piece = board[row][col]
+      if (piece) {
+        str += `${piece.color[0]}${piece.type[0]}${row}${col}`
+      } else {
+        str += "00"
+      }
+    }
+  }
+  str += currentPlayer[0]
+  str += castlingRights.whiteKingside ? "K" : ""
+  str += castlingRights.whiteQueenside ? "Q" : ""
+  str += castlingRights.blackKingside ? "k" : ""
+  str += castlingRights.blackQueenside ? "q" : ""
+  str += enPassant ? `${enPassant.row}${enPassant.col}` : "00"
+  return str
+}
+
 const ChessApp: React.FC = () => {
+  const router = useRouter()
+  const { timeBase, timeIncrement, timeLabel } = useLocalSearchParams()
+
+  // Parse time control or fallback to default
+  const base = timeBase ? parseInt(timeBase as string, 10) : 10
+  const increment = timeIncrement ? parseInt(timeIncrement as string, 10) : 0
+
   const [gameState, setGameState] = useState<GameState>({
     board: createInitialBoard(),
     currentPlayer: "white",
-    whiteTime: 600, // 10 minutes in seconds
-    blackTime: 600,
+    whiteTime: base * 60, // base minutes to seconds
+    blackTime: base * 60,
     whiteMoves: 0,
     blackMoves: 0,
     capturedByWhite: [],
     capturedByBlack: [],
     gameStatus: "Game in progress",
     isGameActive: true,
+    gameResult: "ongoing",
+    enPassantTarget: null,
+    whiteCanCastleKingside: true,
+    whiteCanCastleQueenside: true,
+    blackCanCastleKingside: true,
+    blackCanCastleQueenside: true,
+    moveHistory: [],
+    fiftyMoveCounter: 0,
+    positionHistory: [],
   })
 
   const [selectedSquare, setSelectedSquare] = useState<Position | null>(null)
@@ -92,7 +149,7 @@ const ChessApp: React.FC = () => {
 
   // Timer effect
   useEffect(() => {
-    if (!gameState.isGameActive) return
+    if (!gameState.isGameActive || gameState.gameResult !== "ongoing") return
 
     const timer = setInterval(() => {
       setGameState((prev) => {
@@ -104,6 +161,7 @@ const ChessApp: React.FC = () => {
           return {
             ...prev,
             isGameActive: false,
+            gameResult: prev.currentPlayer === "white" ? "black-wins" : "white-wins",
             gameStatus: `${prev.currentPlayer === "white" ? "Black" : "White"} wins on time!`,
           }
         }
@@ -111,7 +169,7 @@ const ChessApp: React.FC = () => {
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [gameState.currentPlayer, gameState.isGameActive])
+  }, [gameState.currentPlayer, gameState.isGameActive, gameState.gameResult])
 
   // Format time display
   const formatTime = (seconds: number): string => {
@@ -125,13 +183,13 @@ const ChessApp: React.FC = () => {
     return row >= 0 && row < 8 && col >= 0 && col < 8
   }
 
-  // Get all possible moves for a piece
+  // Get all possible moves for a piece (including special moves)
   const getPossibleMoves = useCallback(
-    (piece: ChessPiece, fromRow: number, fromCol: number, board: Board): Position[] => {
+    (piece: ChessPiece, fromRow: number, fromCol: number, board: Board, gameState: GameState): Position[] => {
       const moves: Position[] = []
       const { type, color } = piece
 
-      const addMove = (row: number, col: number) => {
+      const addMove = (row: number, col: number, isSpecialMove = false) => {
         if (isValidPosition(row, col)) {
           const targetPiece = board[row][col]
           if (!targetPiece || targetPiece.color !== color) {
@@ -167,6 +225,19 @@ const ChessApp: React.FC = () => {
               }
             }
           })
+
+          // En passant
+          if (gameState.enPassantTarget) {
+            const enPassantRow = gameState.enPassantTarget.row
+            const enPassantCol = gameState.enPassantTarget.col
+            if (
+              fromRow === (color === "white" ? 3 : 4) &&
+              Math.abs(fromCol - enPassantCol) === 1 &&
+              enPassantRow === fromRow + direction
+            ) {
+              moves.push({ row: enPassantRow, col: enPassantCol })
+            }
+          }
           break
 
         case "rook":
@@ -229,6 +300,36 @@ const ChessApp: React.FC = () => {
           kingDirections.forEach(([dRow, dCol]) => {
             addMove(fromRow + dRow, fromCol + dCol)
           })
+
+          // Castling
+          if (!piece.hasMoved) {
+            const row = color === "white" ? 7 : 0
+
+            // Kingside castling
+            if (
+              (color === "white" ? gameState.whiteCanCastleKingside : gameState.blackCanCastleKingside) &&
+              !board[row][5] &&
+              !board[row][6] &&
+              board[row][7] &&
+              board[row][7].type === "rook" &&
+              !board[row][7].hasMoved
+            ) {
+              moves.push({ row, col: 6 })
+            }
+
+            // Queenside castling
+            if (
+              (color === "white" ? gameState.whiteCanCastleQueenside : gameState.blackCanCastleQueenside) &&
+              !board[row][1] &&
+              !board[row][2] &&
+              !board[row][3] &&
+              board[row][0] &&
+              board[row][0].type === "rook" &&
+              !board[row][0].hasMoved
+            ) {
+              moves.push({ row, col: 2 })
+            }
+          }
           break
 
         case "knight":
@@ -255,7 +356,7 @@ const ChessApp: React.FC = () => {
 
   // Check if king is in check
   const isKingInCheck = useCallback(
-    (board: Board, kingColor: PieceColor): boolean => {
+    (board: Board, kingColor: PieceColor, gameState: GameState): boolean => {
       let kingPos: Position | null = null
 
       // Find the king
@@ -277,7 +378,7 @@ const ChessApp: React.FC = () => {
         for (let col = 0; col < 8; col++) {
           const piece = board[row][col]
           if (piece && piece.color !== kingColor) {
-            const moves = getPossibleMoves(piece, row, col, board)
+            const moves = getPossibleMoves(piece, row, col, board, gameState)
             if (moves.some((move) => move.row === kingPos!.row && move.col === kingPos!.col)) {
               return true
             }
@@ -290,10 +391,150 @@ const ChessApp: React.FC = () => {
     [getPossibleMoves],
   )
 
+  // Check if a square is under attack
+  const isSquareUnderAttack = useCallback(
+    (board: Board, targetRow: number, targetCol: number, attackingColor: PieceColor, gameState: GameState): boolean => {
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const piece = board[row][col]
+          if (piece && piece.color === attackingColor) {
+            const moves = getPossibleMoves(piece, row, col, board, gameState)
+            if (moves.some((move) => move.row === targetRow && move.col === targetCol)) {
+              return true
+            }
+          }
+        }
+      }
+      return false
+    },
+    [getPossibleMoves],
+  )
+
+  // Get all legal moves for current player
+  const getAllLegalMoves = useCallback(
+    (board: Board, playerColor: PieceColor, gameState: GameState): Position[][] => {
+      const allMoves: Position[][] = []
+
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const piece = board[row][col]
+          if (piece && piece.color === playerColor) {
+            const possibleMoves = getPossibleMoves(piece, row, col, board, gameState)
+            const legalMoves: Position[] = []
+
+            for (const move of possibleMoves) {
+              // Test if move is legal (doesn't put own king in check)
+              const testBoard = board.map((r) => [...r])
+              const capturedPiece = testBoard[move.row][move.col]
+
+              // Handle en passant capture
+              if (
+                piece.type === "pawn" &&
+                gameState.enPassantTarget &&
+                move.row === gameState.enPassantTarget.row &&
+                move.col === gameState.enPassantTarget.col
+              ) {
+                const capturedPawnRow = playerColor === "white" ? move.row + 1 : move.row - 1
+                testBoard[capturedPawnRow][move.col] = null
+              }
+
+              testBoard[move.row][move.col] = piece
+              testBoard[row][col] = null
+
+              // Handle castling
+              if (piece.type === "king" && Math.abs(move.col - col) === 2) {
+                const rookFromCol = move.col > col ? 7 : 0
+                const rookToCol = move.col > col ? 5 : 3
+                const rook = testBoard[row][rookFromCol]
+                testBoard[row][rookToCol] = rook
+                testBoard[row][rookFromCol] = null
+
+                // Check if king passes through check
+                const passingCol = move.col > col ? col + 1 : col - 1
+                if (
+                  isSquareUnderAttack(board, row, passingCol, playerColor === "white" ? "black" : "white", gameState)
+                ) {
+                  return false
+                }
+              }
+
+              if (!isKingInCheck(testBoard, playerColor, gameState)) {
+                // Additional check for castling - king cannot pass through check
+                if (piece.type === "king" && Math.abs(move.col - col) === 2) {
+                  const passingCol = move.col > col ? col + 1 : col - 1
+                  if (
+                    !isSquareUnderAttack(board, row, passingCol, playerColor === "white" ? "black" : "white", gameState)
+                  ) {
+                    legalMoves.push(move)
+                  }
+                } else {
+                  legalMoves.push(move)
+                }
+              }
+            }
+
+            if (legalMoves.length > 0) {
+              allMoves.push(legalMoves)
+            }
+          }
+        }
+      }
+
+      return allMoves
+    },
+    [getPossibleMoves, isKingInCheck, isSquareUnderAttack],
+  )
+
+  // Check for checkmate or stalemate
+  const checkGameEnd = useCallback(
+    (board: Board, playerColor: PieceColor, gameState: GameState): "checkmate" | "stalemate" | "ongoing" => {
+      const allLegalMoves = getAllLegalMoves(board, playerColor, gameState)
+      const hasLegalMoves = allLegalMoves.some((moves) => moves.length > 0)
+
+      if (!hasLegalMoves) {
+        const inCheck = isKingInCheck(board, playerColor, gameState)
+        return inCheck ? "checkmate" : "stalemate"
+      }
+
+      return "ongoing"
+    },
+    [getAllLegalMoves, isKingInCheck],
+  )
+
+  // Check for insufficient material
+  const hasInsufficientMaterial = useCallback((board: Board): boolean => {
+    const pieces: ChessPiece[] = []
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        if (board[row][col]) {
+          pieces.push(board[row][col]!)
+        }
+      }
+    }
+
+    // King vs King
+    if (pieces.length === 2) return true
+
+    // King and Bishop vs King or King and Knight vs King
+    if (pieces.length === 3) {
+      const nonKings = pieces.filter((p) => p.type !== "king")
+      return nonKings.length === 1 && (nonKings[0].type === "bishop" || nonKings[0].type === "knight")
+    }
+
+    return false
+  }, [])
+
+  // Check for threefold repetition
+  const checkThreefoldRepetition = useCallback((positionHistory: string[], currentPosition: string): boolean => {
+    const positions = [...positionHistory, currentPosition]
+    const positionCount = positions.filter((pos) => pos === currentPosition).length
+    return positionCount >= 3
+  }, [])
+
   // Handle square press
   const handleSquarePress = useCallback(
     (row: number, col: number) => {
-      if (!gameState.isGameActive) return
+      if (!gameState.isGameActive || gameState.gameResult !== "ongoing") return
 
       if (selectedSquare) {
         const isValidMove = validMoves.some((move) => move.row === row && move.col === col)
@@ -304,12 +545,49 @@ const ChessApp: React.FC = () => {
           const capturedPiece = newBoard[row][col]
 
           if (piece) {
+            const moveNotation = ""
+            let isCapture = !!capturedPiece
+            let isEnPassant = false
+            let isCastling = false
+            let isPromotion = false
+
+            // Handle en passant
+            if (
+              piece.type === "pawn" &&
+              gameState.enPassantTarget &&
+              row === gameState.enPassantTarget.row &&
+              col === gameState.enPassantTarget.col
+            ) {
+              const capturedPawnRow = gameState.currentPlayer === "white" ? row + 1 : row - 1
+              newBoard[capturedPawnRow][col] = null
+              isEnPassant = true
+              isCapture = true
+            }
+
+            // Handle castling
+            if (piece.type === "king" && Math.abs(col - selectedSquare.col) === 2) {
+              const rookFromCol = col > selectedSquare.col ? 7 : 0
+              const rookToCol = col > selectedSquare.col ? 5 : 3
+              const rook = newBoard[row][rookFromCol]
+              if (rook) {
+                newBoard[row][rookToCol] = { ...rook, hasMoved: true }
+                newBoard[row][rookFromCol] = null
+              }
+              isCastling = true
+            }
+
             // Make the move
             newBoard[row][col] = { ...piece, hasMoved: true }
             newBoard[selectedSquare.row][selectedSquare.col] = null
 
+            // Handle pawn promotion
+            if (piece.type === "pawn" && (row === 0 || row === 7)) {
+              newBoard[row][col] = { ...piece, type: "queen", hasMoved: true }
+              isPromotion = true
+            }
+
             // Check if this move puts own king in check
-            if (!isKingInCheck(newBoard, gameState.currentPlayer)) {
+            if (!isKingInCheck(newBoard, gameState.currentPlayer, gameState)) {
               setGameState((prev) => {
                 const newState = { ...prev }
                 newState.board = newBoard
@@ -330,18 +608,93 @@ const ChessApp: React.FC = () => {
                   newState.blackMoves = prev.blackMoves + 1
                 }
 
-                // Switch players
-                newState.currentPlayer = gameState.currentPlayer === "white" ? "black" : "white"
+                // Update castling rights
+                if (piece.type === "king") {
+                  if (gameState.currentPlayer === "white") {
+                    newState.whiteCanCastleKingside = false
+                    newState.whiteCanCastleQueenside = false
+                  } else {
+                    newState.blackCanCastleKingside = false
+                    newState.blackCanCastleQueenside = false
+                  }
+                } else if (piece.type === "rook") {
+                  if (gameState.currentPlayer === "white") {
+                    if (selectedSquare.col === 0) newState.whiteCanCastleQueenside = false
+                    if (selectedSquare.col === 7) newState.whiteCanCastleKingside = false
+                  } else {
+                    if (selectedSquare.col === 0) newState.blackCanCastleQueenside = false
+                    if (selectedSquare.col === 7) newState.blackCanCastleKingside = false
+                  }
+                }
 
-                // Check for check
-                if (isKingInCheck(newBoard, newState.currentPlayer)) {
-                  newState.gameStatus = `${newState.currentPlayer === "white" ? "White" : "Black"} is in check!`
+                // Update en passant target
+                if (piece.type === "pawn" && Math.abs(row - selectedSquare.row) === 2) {
+                  newState.enPassantTarget = {
+                    row: selectedSquare.row + (row - selectedSquare.row) / 2,
+                    col: col,
+                  }
+                } else {
+                  newState.enPassantTarget = null
+                }
+
+                // Update fifty move counter
+                if (piece.type === "pawn" || isCapture) {
+                  newState.fiftyMoveCounter = 0
+                } else {
+                  newState.fiftyMoveCounter = prev.fiftyMoveCounter + 1
+                }
+
+                // Add position to history
+                const currentPosition = boardToString(
+                  newBoard,
+                  gameState.currentPlayer === "white" ? "black" : "white",
+                  {
+                    whiteKingside: newState.whiteCanCastleKingside,
+                    whiteQueenside: newState.whiteCanCastleQueenside,
+                    blackKingside: newState.blackCanCastleKingside,
+                    blackQueenside: newState.blackCanCastleQueenside,
+                  },
+                  newState.enPassantTarget,
+                )
+                newState.positionHistory = [...prev.positionHistory, currentPosition]
+
+                // Switch players
+                const nextPlayer = gameState.currentPlayer === "white" ? "black" : "white"
+                newState.currentPlayer = nextPlayer
+
+                // Check for game end conditions
+                const gameEndStatus = checkGameEnd(newBoard, nextPlayer, newState)
+
+                if (gameEndStatus === "checkmate") {
+                  newState.gameResult = gameState.currentPlayer === "white" ? "white-wins" : "black-wins"
+                  newState.gameStatus = `Checkmate! ${gameState.currentPlayer === "white" ? "White" : "Black"} wins!`
+                  newState.isGameActive = false
+                } else if (gameEndStatus === "stalemate") {
+                  newState.gameResult = "draw"
+                  newState.gameStatus = "Stalemate! Game is drawn."
+                  newState.isGameActive = false
+                } else if (hasInsufficientMaterial(newBoard)) {
+                  newState.gameResult = "draw"
+                  newState.gameStatus = "Draw by insufficient material."
+                  newState.isGameActive = false
+                } else if (newState.fiftyMoveCounter >= 100) {
+                  newState.gameResult = "draw"
+                  newState.gameStatus = "Draw by fifty-move rule."
+                  newState.isGameActive = false
+                } else if (checkThreefoldRepetition(prev.positionHistory, currentPosition)) {
+                  newState.gameResult = "draw"
+                  newState.gameStatus = "Draw by threefold repetition."
+                  newState.isGameActive = false
+                } else if (isKingInCheck(newBoard, nextPlayer, newState)) {
+                  newState.gameStatus = `${nextPlayer === "white" ? "White" : "Black"} is in check!`
                 } else {
                   newState.gameStatus = "Game in progress"
                 }
 
                 return newState
               })
+            } else {
+              Alert.alert("Invalid Move", "This move would put your king in check!")
             }
           }
         }
@@ -352,13 +705,146 @@ const ChessApp: React.FC = () => {
         const piece = gameState.board[row][col]
         if (piece && piece.color === gameState.currentPlayer) {
           setSelectedSquare({ row, col })
-          const moves = getPossibleMoves(piece, row, col, gameState.board)
-          setValidMoves(moves)
+          const moves = getPossibleMoves(piece, row, col, gameState.board, gameState)
+
+          // Filter out illegal moves that would put king in check
+          const legalMoves = moves.filter((move) => {
+            const testBoard = gameState.board.map((r) => [...r])
+
+            // Handle en passant capture
+            if (
+              piece.type === "pawn" &&
+              gameState.enPassantTarget &&
+              move.row === gameState.enPassantTarget.row &&
+              move.col === gameState.enPassantTarget.col
+            ) {
+              const capturedPawnRow = gameState.currentPlayer === "white" ? move.row + 1 : move.row - 1
+              testBoard[capturedPawnRow][move.col] = null
+            }
+
+            testBoard[move.row][move.col] = piece
+            testBoard[row][col] = null
+
+            // Handle castling
+            if (piece.type === "king" && Math.abs(move.col - col) === 2) {
+              const rookFromCol = move.col > col ? 7 : 0
+              const rookToCol = move.col > col ? 5 : 3
+              const rook = testBoard[row][rookFromCol]
+              testBoard[row][rookToCol] = rook
+              testBoard[row][rookFromCol] = null
+
+              // Check if king passes through check
+              const passingCol = move.col > col ? col + 1 : col - 1
+              if (
+                isSquareUnderAttack(
+                  gameState.board,
+                  row,
+                  passingCol,
+                  gameState.currentPlayer === "white" ? "black" : "white",
+                  gameState,
+                )
+              ) {
+                return false
+              }
+            }
+
+            return !isKingInCheck(testBoard, gameState.currentPlayer, gameState)
+          })
+
+          setValidMoves(legalMoves)
         }
       }
     },
-    [selectedSquare, validMoves, gameState, getPossibleMoves, isKingInCheck],
+    [
+      selectedSquare,
+      validMoves,
+      gameState,
+      getPossibleMoves,
+      isKingInCheck,
+      isSquareUnderAttack,
+      checkGameEnd,
+      hasInsufficientMaterial,
+      checkThreefoldRepetition,
+    ],
   )
+
+  // Reset game
+  const resetGame = () => {
+    setGameState({
+      board: createInitialBoard(),
+      currentPlayer: "white",
+      whiteTime: base * 60,
+      blackTime: base * 60,
+      whiteMoves: 0,
+      blackMoves: 0,
+      capturedByWhite: [],
+      capturedByBlack: [],
+      gameStatus: "Game in progress",
+      isGameActive: true,
+      gameResult: "ongoing",
+      enPassantTarget: null,
+      whiteCanCastleKingside: true,
+      whiteCanCastleQueenside: true,
+      blackCanCastleKingside: true,
+      blackCanCastleQueenside: true,
+      moveHistory: [],
+      fiftyMoveCounter: 0,
+      positionHistory: [],
+    })
+    setSelectedSquare(null)
+    setValidMoves([])
+  }
+
+  // Add increment after each move
+  const handleMove = (from: Position, to: Position) => {
+    const piece = gameState.board[from.row][from.col]
+    const target = gameState.board[to.row][to.col]
+
+    // Make the move
+    const newBoard = gameState.board.map((r) => [...r])
+    newBoard[to.row][to.col] = { ...piece, hasMoved: true }
+    newBoard[from.row][from.col] = null
+
+    // Handle pawn promotion
+    if (piece && piece.type === "pawn" && (to.row === 0 || to.row === 7)) {
+      newBoard[to.row][to.col] = { ...piece, type: "queen", hasMoved: true, color: piece.color, id: piece.id }
+    }
+
+    setGameState((prev) => {
+      let newWhiteTime = prev.whiteTime
+      let newBlackTime = prev.blackTime
+      if (prev.currentPlayer === "white") newWhiteTime += increment
+      else newBlackTime += increment
+
+      // Defensive: ensure piece is not null
+      const piece = prev.board[from.row][from.col]
+      const target = prev.board[to.row][to.col]
+      if (!piece) return prev
+
+      // Make the move
+      let newBoard = prev.board.map((row) => row.slice())
+      newBoard[from.row][from.col] = null
+      newBoard[to.row][to.col] = { ...piece, hasMoved: true, type: piece.type, color: piece.color, id: piece.id }
+
+      // Pawn promotion
+      if (piece && piece.type === "pawn" && (to.row === 0 || to.row === 7)) {
+        newBoard[to.row][to.col] = { ...piece, type: "queen", hasMoved: true, color: piece.color, id: piece.id }
+      }
+
+      return {
+        ...prev,
+        board: newBoard,
+        whiteTime: newWhiteTime,
+        blackTime: newBlackTime,
+        whiteCanCastleKingside: piece && piece.type === "king" ? false : prev.whiteCanCastleKingside,
+        whiteCanCastleQueenside: piece && piece.type === "king" ? false : prev.whiteCanCastleQueenside,
+        blackCanCastleKingside: piece && piece.type === "king" ? false : prev.blackCanCastleKingside,
+        blackCanCastleQueenside: piece && piece.type === "king" ? false : prev.blackCanCastleQueenside,
+        enPassantTarget: piece && piece.type === "pawn" && Math.abs(to.row - from.row) === 2 ? { row: (from.row + to.row) / 2, col: to.col } : null,
+        fiftyMoveCounter: piece && (piece.type === "pawn" || !!target) ? 0 : prev.fiftyMoveCounter + 1,
+      }
+    })
+  }
 
   // Render captured pieces
   const renderCapturedPieces = (pieces: ChessPiece[]) => {
@@ -414,6 +900,7 @@ const ChessApp: React.FC = () => {
       >
         {piece && <Text style={styles.piece}>{PIECE_SYMBOLS[piece.color][piece.type]}</Text>}
         {isValidMove && !piece && <View style={styles.validMoveDot} />}
+        {isValidMove && piece && <View style={styles.captureIndicator} />}
       </TouchableOpacity>
     )
   }
@@ -439,9 +926,22 @@ const ChessApp: React.FC = () => {
       {/* White player info (bottom) */}
       {renderPlayerInfo("white", false)}
 
-      {/* Game status */}
+      {/* Game status and controls */}
       <View style={styles.statusContainer}>
-        <Text style={styles.gameStatus}>{gameState.gameStatus}</Text>
+        <Text style={[styles.gameStatus, gameState.gameResult !== "ongoing" && styles.gameEndStatus]}>
+          {gameState.gameStatus}
+        </Text>
+
+        {gameState.gameResult !== "ongoing" && (
+          <TouchableOpacity style={styles.resetButton} onPress={resetGame}>
+            <Text style={styles.resetButtonText}>New Game</Text>
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.gameInfo}>
+          <Text style={styles.infoText}>Fifty-move counter: {gameState.fiftyMoveCounter}/100</Text>
+          {gameState.enPassantTarget && <Text style={styles.infoText}>En passant available</Text>}
+        </View>
       </View>
     </SafeAreaView>
   )
@@ -551,6 +1051,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#22c55e",
     opacity: 0.7,
   },
+  captureIndicator: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#ef4444",
+  },
   statusContainer: {
     padding: 15,
     alignItems: "center",
@@ -560,6 +1069,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "500",
     textAlign: "center",
+    marginBottom: 8,
+  },
+  gameEndStatus: {
+    color: "#81b64c",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  resetButton: {
+    backgroundColor: "#81b64c",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  resetButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  gameInfo: {
+    marginTop: 10,
+    alignItems: "center",
+  },
+  infoText: {
+    color: "#ccc",
+    fontSize: 12,
+    marginVertical: 2,
   },
 })
 

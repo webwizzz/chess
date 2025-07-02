@@ -4,7 +4,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 
 export default function MatchMaking() {
   const router = useRouter();
-  const { variant } = useLocalSearchParams();
+  const { variant, timeBase, timeIncrement, timeLabel } = useLocalSearchParams();
   const [opponent, setOpponent] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
 
@@ -18,7 +18,7 @@ export default function MatchMaking() {
       await new Promise(res => setTimeout(res, 1000));
       // After matchmaking and session creation, redirect based on variant
       if (variant === "Classic Chess") {
-        router.replace("/Classic");
+        router.replace({ pathname: "/Classic", params: { timeBase, timeIncrement, timeLabel } });
       } else if (variant === "Decay chess") {
         router.replace("/Decay");
       }

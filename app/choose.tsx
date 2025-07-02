@@ -43,7 +43,13 @@ export default function Choose() {
             elevation: 3,
           }}
           activeOpacity={0.85}
-          onPress={() => router.push({ pathname: "/matchmaking", params: { variant: variant.title } })}
+          onPress={() => {
+            if (variant.title === "Classic Chess") {
+              router.push({ pathname: "/ClassicTimeControl", params: { variant: variant.title } });
+            } else {
+              router.push({ pathname: "/matchmaking", params: { variant: variant.title } });
+            }
+          }}
         >
           <Image source={{ uri: variant.image }} style={{ width: 80, height: 80, borderRadius: 10, marginBottom: 12, resizeMode: "contain" }} />
           <Text style={{ color: "#00A862", fontSize: 22, fontWeight: "bold", marginBottom: 6, textAlign: "center" }}>{variant.title}</Text>
