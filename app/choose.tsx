@@ -50,6 +50,10 @@ export default function Choose() {
   const handleVariantSelect = async (variant: string) => {
     if (!userId) return;
 
+    // if (variant.title === "Classic") {
+    //   router.push({ pathname: "/ClassicTimeControl", params: { variant: variant.title } });
+    // }
+
     setSocketConnecting(true);
     const socketInstance = getSocket(userId, "matchmaking");
 

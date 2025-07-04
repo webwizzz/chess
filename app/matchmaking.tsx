@@ -1,12 +1,12 @@
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Text, View } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
 import { Socket } from "socket.io-client";
 import { getSocketInstance } from "../utils/socketManager";
 
 export default function MatchMaking() {
   const router = useRouter();
-  const { variant } = useLocalSearchParams();
+  const { variant, timeBase, timeIncrement, timeLabel } = useLocalSearchParams();
   const [opponent, setOpponent] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -69,9 +69,9 @@ export default function MatchMaking() {
 
   useEffect(() => {
     // if (opponent && variant) {
-    //   if(variant === "Classic") {
-    //     router.replace("/choose");
-    //   }
+    //   if (variant === "Classic Chess") {
+      //   router.replace({ pathname: "/Classic", params: { timeBase, timeIncrement, timeLabel } });
+      // } 
     //   else if(variant === "Decay Chess") {
     //     router.replace({ pathname: "/decay/[opponent]", params: { opponent } });
     //   }
