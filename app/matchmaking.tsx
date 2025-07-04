@@ -60,26 +60,29 @@ export default function MatchMaking() {
     };
   }, [socket]);
 
-//  useEffect(() => {
-//     // Simulate matchmaking delay
-//     const interval = setInterval(() => setTimer(t => t + 1), 1000);
-//     const timeout = setTimeout(async () => {
-//       setOpponent("Lader (Opponent)");
-//       clearInterval(interval);
-//       // Simulate session creation
-//       await new Promise(res => setTimeout(res, 1000));
-//       // After matchmaking and session creation, redirect based on variant
-//       // if (variant === "Classic Chess") {
-//       //   router.replace("/Classic");
-//       // } else if (variant === "Decay chess") {
-//       //   router.replace("/Decay");
-//       // }
-//     }, 4000); // 4 seconds for demo
-//     return () => {
-//       clearTimeout(timeout);
-//       clearInterval(interval);
-//     };
-//   }, []);
+  useEffect(() => {
+    if (!opponent && timer > 30) {
+      alert("No opponent found within 30 seconds. Redirecting to choose page.");
+      router.replace("/choose");
+    }
+  }, [timer, opponent, router]);
+
+  useEffect(() => {
+    // if (opponent && variant) {
+    //   if(variant === "Classic") {
+    //     router.replace("/choose");
+    //   }
+    //   else if(variant === "Decay Chess") {
+    //     router.replace({ pathname: "/decay/[opponent]", params: { opponent } });
+    //   }
+    //   // else if(variant === "Bullet") {
+    //   //   router.replace({ pathname: "/Bullet", params: { opponent } });
+    //   // }
+    //   // else if(variant === "Chess960") {
+    //   //   router.replace({ pathname: "/Chess960", params: { opponent } });
+    //   // }
+    // }
+  }, [opponent, variant, router]);
 
   return (
     <View style={{ flex: 1, backgroundColor: "#23272A", justifyContent: "center", alignItems: "center", padding: 20 }}>
@@ -100,12 +103,13 @@ export default function MatchMaking() {
           <Text style={{ color: opponent ? "#fff" : "#b0b3b8", fontSize: 18, fontWeight: "bold" }}>{opponent || "Searching..."}</Text>
         </View>
       </View>
-      {/* {!opponent && (
+      {/* Show timer and spinner if not matched */}
+      {!opponent && (
         <View style={{ marginTop: 40, alignItems: "center" }}>
           <ActivityIndicator size="large" color="#00A862" />
           <Text style={{ color: "#b0b3b8", fontSize: 16, marginTop: 12 }}>Finding an opponent... ({timer}s)</Text>
         </View>
-      )} */}
+      )}
       {opponent && (
         <View style={{ marginTop: 40, alignItems: "center" }}>
           <Text style={{ color: "#00A862", fontSize: 20, fontWeight: "bold" }}>Match Found!</Text>

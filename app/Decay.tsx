@@ -1,9 +1,7 @@
-"use client"
-
 import type React from "react"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions, SafeAreaView, StatusBar } from "react-native"
-
+import {useLocalSearchParams} from "expo-router"
 // Types
 type PieceType = "king" | "queen" | "rook" | "bishop" | "knight" | "pawn"
 type PieceColor = "white" | "black"
@@ -93,6 +91,7 @@ const createInitialBoard = (): Board => {
 }
 
 const DecayChessApp: React.FC = () => {
+  const { opponent } = useLocalSearchParams()
   const [gameState, setGameState] = useState<GameState>({
     board: createInitialBoard(),
     currentPlayer: "white",
@@ -115,9 +114,10 @@ const DecayChessApp: React.FC = () => {
 
   const [selectedSquare, setSelectedSquare] = useState<Position | null>(null)
   const [validMoves, setValidMoves] = useState<Position[]>([])
+  
 
   // Ref to hold the interval id
-  const decayTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const decayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Main game timer effect
   useEffect(() => {
@@ -643,10 +643,9 @@ const DecayChessApp: React.FC = () => {
     const blackDecay = gameState.blackDecayTimer
 
     return (
-      (whiteDecay && whiteDecay.position.row === row && whiteDecay.position.col === col) ||
-      (blackDecay && blackDecay.position.row === row && blackDecay.position.col === col)
-    )
-  }
+      (!!whiteDecay && whiteDecay.position.row === row && whiteDecay.position.col === col) ||
+      (!!blackDecay && blackDecay.position.row === row && blackDecay.position.col === col)
+    )  }
 
   // Render chess square
   const renderSquare = (row: number, col: number) => {
