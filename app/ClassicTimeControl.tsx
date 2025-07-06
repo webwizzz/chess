@@ -1,16 +1,48 @@
+import { getSocket } from "@/utils/socketManager";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 
 const timeControls = [
-  { label: "Blitz", base: 3, increment: 2, description: "3+2 (3 min, 2s increment)" },
-  { label: "Bullet", base: 1, increment: 0, description: "1+0 (1 min, no increment)" },
+  { label: "Blitz", description: "3+2 (3 min, 2s increment)" },
+  { label: "Bullet", description: "1+0 (1 min, no increment)" },
+  { label: "Standard", description: "10 mins" },
 ];
 
 export default function ClassicTimeControl() {
   const router = useRouter();
-  const { variant } = useLocalSearchParams();
+  const {userId}  = useLocalSearchParams();
   const [selected, setSelected] = useState(0);
+  const [socketConnecting, setSocketConnecting] = useState(false);
+  console.log("ClassicTimeControl userId:", userId);
+
+  const handleSubVariantSelect = async () => {
+      if (!userId) return;
+  
+      const tc = timeControls[selected];
+      const subvariant = tc.label.toLowerCase();
+      if (!tc) return;
+      setSocketConnecting(true);
+      const socketInstance = getSocket(userId, "matchmaking");
+      console.log("Connecting to socket for Classic matchmaking with time control:", tc.label);
+      console.log("Socket instance:", socketInstance);
+  
+      socketInstance.connect();
+  
+      socketInstance.on("connect", () => {
+        socketInstance.emit("queue:join", { userId, variant: "Classic", subvariant });
+        setSocketConnecting(false);
+        router.push({
+          pathname: "/matchmaking",
+          params: { variant: "Classic", subvariant, userId},
+        });
+      });
+  
+      socketInstance.on("connect_error", () => {
+        alert("Failed to connect to server!");
+        setSocketConnecting(false);
+      });
+    };
 
   return (
     <View style={{ flex: 1, backgroundColor: "#23272A", justifyContent: "center", alignItems: "center", padding: 24 }}>
@@ -47,16 +79,14 @@ export default function ClassicTimeControl() {
           paddingVertical: 14,
           paddingHorizontal: 40,
           marginTop: 30,
+          opacity: socketConnecting ? 0.6 : 1,
         }}
-        onPress={() => {
-          const tc = timeControls[selected];
-          router.push({
-            pathname: "/matchmaking",
-            params: { variant: variant || "Classic Chess", timeBase: tc.base, timeIncrement: tc.increment, timeLabel: tc.label },
-          });
-        }}
+        onPress={handleSubVariantSelect}
+        disabled={socketConnecting}
       >
-        <Text style={{ color: "#fff", fontSize: 18, fontWeight: "bold" }}>Continue</Text>
+        <Text style={{ color: "#fff", fontSize: 18, fontWeight: "bold" }}>
+          {socketConnecting ? "Connecting..." : "Continue"}
+        </Text>
       </TouchableOpacity>
     </View>
   );

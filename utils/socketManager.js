@@ -4,7 +4,8 @@ let socketInstance = null;
 
 export const getSocket = (
   userId,
-  connectionType
+  connectionType,
+  sessionId
 ) => {
   if (!socketInstance || !socketInstance.connected) {
 
@@ -12,6 +13,9 @@ export const getSocket = (
     switch (connectionType) {
       case "matchmaking":
         namespace = "/matchmaking";
+        break;
+      case "game":
+        namespace = "/game";
         break;
       default:
         console.error(`Invalid connection type: ${connectionType}`);
@@ -21,7 +25,7 @@ export const getSocket = (
     const socketUrl = `http://localhost:3000${namespace}`;
     const socketOptions = {
       path: "/socket.io",
-      query: { userId },
+      query: { userId, sessionId },
       transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: 5,

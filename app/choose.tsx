@@ -11,11 +11,11 @@ export default function Choose() {
 
   const variants = [
     {
-      title: "Classic Chess",
+      title: "Decay Chess",
       description: "Pieces decay after a set number of moves. Adapt your strategy!",
     },
     {
-      title: "Decay chess",
+      title: "Six Pointer",
       description: "Each piece has a point value. Score 6 points to win!",
     },
     {
@@ -50,9 +50,10 @@ export default function Choose() {
   const handleVariantSelect = async (variant: string) => {
     if (!userId) return;
 
-    // if (variant.title === "Classic") {
-    //   router.push({ pathname: "/ClassicTimeControl", params: { variant: variant.title } });
-    // }
+    if (variant === "Classic") {
+      router.replace({pathname: "/classictimecontrol", params: {userId}} as any);
+      return;
+    }
 
     setSocketConnecting(true);
     const socketInstance = getSocket(userId, "matchmaking");
