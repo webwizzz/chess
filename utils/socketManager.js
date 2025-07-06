@@ -8,6 +8,7 @@ export const getSocket = (
   sessionId
 ) => {
   if (!socketInstance || !socketInstance.connected) {
+    console.log(userId, connectionType, sessionId);
 
     let namespace = "";
     switch (connectionType) {
@@ -22,10 +23,11 @@ export const getSocket = (
         return null;
     }
 
+
     const socketUrl = `http://localhost:3000${namespace}`;
     const socketOptions = {
       path: "/socket.io",
-      query: { userId, sessionId },
+      auth: { userId, sessionId },
       transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: 5,

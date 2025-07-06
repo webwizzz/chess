@@ -107,7 +107,8 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
         Alert.alert("Connection Error", "Failed to connect to game socket. Please try again.");
         return;
     }
-    // Determine player color and board orientation
+
+    // Initial player color and board orientation
     const userColor = gameState.userColor[userId];
     const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white";
     setPlayerColor(safePlayerColor);
@@ -120,6 +121,16 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
       }
     };
   }, []);
+
+  // Always update playerColor and isMyTurn on every gameState change
+  useEffect(() => {
+    const userColor = gameState.userColor[userId];
+    const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white";
+    setPlayerColor(safePlayerColor);
+    setBoardFlipped(safePlayerColor === "black");
+    setIsMyTurn(gameState.board.activeColor === safePlayerColor);
+    console.log("[DEBUG] userId:", userId, "userColor:", userColor, "playerColor:", safePlayerColor, "activeColor:", gameState.board.activeColor, "isMyTurn:", gameState.board.activeColor === safePlayerColor);
+  }, [gameState, userId]);
 
   useEffect(() => {
     if (!socket) return;
@@ -142,76 +153,208 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     };
   }, [socket]);
 
+  // Timer effect: decrement timer for active player every second
+useEffect(() => {
+  if (gameState.status !== "active") {
+    if (timerRef.current) clearInterval(timerRef.current);
+    return;
+  }
+  if (timerRef.current) clearInterval(timerRef.current);
+  if (!isMyTurn && gameState.board.activeColor !== playerColor) {
+    // Not my turn, but still decrement opponent's timer
+    timerRef.current = setInterval(() => {
+      setGameState(prev => {
+        const color = prev.board.activeColor;
+        return {
+          ...prev,
+          timeControl: {
+            ...prev.timeControl,
+            timers: {
+              ...prev.timeControl.timers,
+              [color]: Math.max(0, prev.timeControl.timers[color] - 1000)
+            }
+          }
+        };
+      });
+    }, 1000);
+  } else if (isMyTurn) {
+    timerRef.current = setInterval(() => {
+      setGameState(prev => {
+        const color = prev.board.activeColor;
+        return {
+          ...prev,
+          timeControl: {
+            ...prev.timeControl,
+            timers: {
+              ...prev.timeControl.timers,
+              [color]: Math.max(0, prev.timeControl.timers[color] - 1000)
+            }
+          }
+        };
+      });
+    }, 1000);
+  }
+  return () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+  };
+}, [isMyTurn, gameState.status, gameState.board.activeColor]);
+
+  // Handles the 'game:move' event from the server
   const handleGameMove = (data: any) => {
+    // data: { move: {from, to, ...}, gameState: {...} }
     console.log("Move received:", data);
-    setGameState(prevState => ({
-      ...prevState,
-      ...data.gameState
-    }));
-    setMoveHistory(data.gameState.moves || []);
-    setSelectedSquare(null);
-    setPossibleMoves([]);
-    setIsMyTurn(data.gameState.board.activeColor === playerColor);
+    if (data && data.gameState) {
+      setGameState(prevState => ({
+        ...prevState,
+        ...data.gameState
+      }));
+      setMoveHistory(data.gameState.moves || []);
+      setSelectedSquare(null);
+      setPossibleMoves([]);
+      setIsMyTurn(data.gameState.board.activeColor === playerColor);
+    }
   };
 
-  const handlePossibleMoves = (data: { moves: string[] }) => {
-    console.log("Possible moves:", data.moves);
-    setPossibleMoves(data.moves);
+  // Handles the 'game:possibleMoves' event from the server
+  const handlePossibleMoves = (data: { square: string; moves: any[] }) => {
+    // data.moves: array of Move objects from backend
+    console.log("Possible moves (raw):", data.moves);
+    // Extract the 'to' field from each move object
+    let moves: string[] = [];
+    if (Array.isArray(data.moves) && data.moves.length > 0) {
+      if (typeof data.moves[0] === 'object' && data.moves[0].to) {
+        moves = data.moves.map((m: any) => m.to);
+      } else if (typeof data.moves[0] === 'string' && data.moves[0].length === 4) {
+        moves = data.moves.map((m: string) => m.slice(2, 4));
+      } else if (typeof data.moves[0] === 'string') {
+        moves = data.moves;
+      }
+    }
+    console.log("Possible moves (dest squares):", moves);
+    setPossibleMoves(moves);
   };
 
+  // Handles the 'game:gameState' event from the server
   const handleGameStateUpdate = (data: any) => {
+    // data: { gameState: {...} }
     console.log("Game state update:", data);
-    setGameState(prevState => ({ ...prevState, ...data }));
+    if (data && data.gameState) {
+      setGameState(prevState => ({ ...prevState, ...data.gameState }));
+      setIsMyTurn(data.gameState.board.activeColor === playerColor);
+    }
   };
 
+  // Handles the 'game:timer' event from the server
   const handleTimerUpdate = (data: any) => {
+    // data: { timers: ..., black: ... }
     console.log("Timer update:", data);
     setGameState(prevState => ({
       ...prevState,
       timeControl: {
         ...prevState.timeControl,
-        timers: data.timers
+        timers: data.timers || {
+          white: data.timers || prevState.timeControl.timers.white,
+          black: data.black || prevState.timeControl.timers.black
+        }
       }
     }));
   };
 
+  // Handles the 'game:end' event from the server
   const handleGameEnd = (data: any) => {
+    // data: { gameState: {...} }
     console.log("Game ended:", data);
-    setGameState(prevState => ({
-      ...prevState,
-      status: "ended",
-      result: data.result,
-      winner: data.winner
-    }));
-    Alert.alert("Game Over", `Result: ${data.result}`);
+    if (data && data.gameState) {
+      setGameState(prevState => ({
+        ...prevState,
+        ...data.gameState,
+        status: "ended"
+      }));
+      Alert.alert("Game Over", `Result: ${data.gameState.result || "Game ended"}`);
+    }
   };
 
+  // Handles the 'game:error' event from the server
   const handleGameError = (data: any) => {
+    // data: { message: "Error message" }
     console.log("Game error:", data);
-    Alert.alert("Error", data.error || "An error occurred");
+    Alert.alert("Error", data.message || data.error || "An error occurred");
   };
 
+  // Emits a request for possible moves for a square
   const requestPossibleMoves = (square: string) => {
-    if (!socket || !isMyTurn) return;
-    
+    if (!socket) return;
     socket.emit("game:getPossibleMoves", {
-      sessionId: gameState.sessionId,
       square: square
     });
   };
 
-  const makeMove = (move: Move) => {
-    if (!socket || !isMyTurn) return;
+  // Helper to update the board position string for a simple move (no castling, no en passant, no promotion)
+  function updatePositionString(position: string, from: string, to: string): string {
+    // position: FEN piece placement part (e.g. rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR)
+    // from, to: e.g. 'e2', 'e4'
+    // Returns new position string after moving piece from 'from' to 'to'
+    let pos = position.replace(/\//g, '');
+    const files = FILES;
+    const ranks = RANKS;
+    const fromFile = files.indexOf(from[0]);
+    const fromRank = ranks.indexOf(from[1]);
+    const toFile = files.indexOf(to[0]);
+    const toRank = ranks.indexOf(to[1]);
+    if (fromFile === -1 || fromRank === -1 || toFile === -1 || toRank === -1) return position;
+    const fromIdx = fromRank * 8 + fromFile;
+    const toIdx = toRank * 8 + toFile;
+    let arr = pos.split('');
+    arr[toIdx] = arr[fromIdx];
+    arr[fromIdx] = '1';
+    // Collapse consecutive '1's into numbers and re-insert slashes every 8 chars
+    let collapsed = '';
+    for (let i = 0; i < 8; i++) {
+      let row = arr.slice(i * 8, (i + 1) * 8).join('');
+      row = row.replace(/1{1,8}/g, m => m.length.toString());
+      collapsed += row;
+      if (i < 7) collapsed += '/';
+    }
+    return collapsed;
+  }
 
-    socket.emit("game:makeMove", {
-      sessionId: gameState.sessionId,
-      move: move
+  // Emits a move to the server in the required format
+  const makeMove = (move: Move) => {
+    console.log('[DEBUG] Attempting to make move', move, 'isMyTurn:', isMyTurn, 'playerColor:', playerColor, 'activeColor:', gameState.board.activeColor);
+    if (!socket || !isMyTurn) {
+      console.log('[DEBUG] Not emitting move: socket or isMyTurn false');
+      return;
+    }
+    // Convert move object to string format (e.g., "e2e4")
+    const moveStr = move.promotion
+      ? `${move.from}${move.to}${move.promotion}`
+      : `${move.from}${move.to}`;
+    // Optimistically update the board for immediate feedback
+    setGameState(prevState => {
+      let newPosition = updatePositionString(prevState.board.position, move.from, move.to);
+      let newActiveColor: 'white' | 'black' = playerColor === 'white' ? 'black' : 'white';
+      let newState: GameState = {
+        ...prevState,
+        lastMove: moveStr,
+        board: {
+          ...prevState.board,
+          position: newPosition,
+          activeColor: newActiveColor,
+        },
+      };
+      return newState;
     });
+    setIsMyTurn(false);
+    setSelectedSquare(null);
+    setPossibleMoves([]);
+    socket.emit("game:makeMove", {
+      move: moveStr,
+      timestamp: Math.floor(Date.now() / 1000)
+    });
+    console.log('[DEBUG] Move emitted:', moveStr);
   };
 
   const handleSquarePress = (square: string) => {
-    if (!isMyTurn) return;
-
     if (selectedSquare === square) {
       // Deselect if clicking the same square
       setSelectedSquare(null);
@@ -220,14 +363,16 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     }
 
     if (selectedSquare && possibleMoves.includes(square)) {
-      // Make move if valid destination
+      // Only allow moves that are in possibleMoves
       makeMove({ from: selectedSquare, to: square });
+      setSelectedSquare(null);
+      setPossibleMoves([]);
       return;
     }
 
-    // Select new square and get possible moves
+    // Only allow selecting a piece if it's the player's turn and the piece belongs to them
     const piece = getPieceAt(square);
-    if (piece && isPieceOwnedByPlayer(piece, playerColor)) {
+    if (isMyTurn && piece && isPieceOwnedByPlayer(piece, playerColor)) {
       setSelectedSquare(square);
       requestPossibleMoves(square);
     } else {
@@ -280,9 +425,8 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     const isSelected = selectedSquare === square;
     const isPossibleMove = possibleMoves.includes(square);
     const isLastMove = gameState.lastMove && (gameState.lastMove.includes(square));
-    
     const piece = getPieceAt(square);
-    
+
     return (
       <TouchableOpacity
         key={square}
@@ -292,10 +436,15 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
             width: squareSize,
             height: squareSize,
             backgroundColor: isLight ? '#F0D9B5' : '#B58863',
+            borderWidth: isPossibleMove ? 4 : isSelected ? 3 : isLastMove ? 3 : 0,
+            borderColor: isPossibleMove
+              ? '#22c55e'
+              : isSelected
+              ? '#7dd3fc'
+              : isLastMove
+              ? '#fbbf24'
+              : 'transparent',
           },
-          isSelected && styles.selectedSquare,
-          isPossibleMove && styles.possibleMoveSquare,
-          isLastMove && styles.lastMoveSquare,
         ]}
         onPress={() => handleSquarePress(square)}
       >
@@ -336,12 +485,13 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     }
     const timer = gameState.timeControl.timers[color];
     const isActive = gameState.board.activeColor === color;
+    const isMe = playerColor === color;
 
     return (
       <View style={[styles.playerInfo, isTop && styles.playerInfoTop]}>
         <View style={styles.playerLeft}>
           <Text style={[styles.playerName, isActive && styles.activePlayer]}>
-            {player.username}
+            {player.username} {isMe && '(You)'}
           </Text>
           <Text style={styles.playerRating}>
             {player.rating > 0 ? `(${player.rating})` : '(Unrated)'}
@@ -352,6 +502,12 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
             {formatTime(timer)}
           </Text>
         </View>
+        {isMe && isActive && (
+          <Text style={styles.yourTurnText}>Your Turn</Text>
+        )}
+        {isMe && !isActive && (
+          <Text style={styles.waitingText}>Opponent's Turn</Text>
+        )}
       </View>
     );
   };
@@ -534,13 +690,16 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   selectedSquare: {
-    backgroundColor: '#7dd3fc !important',
+    // backgroundColor: '#7dd3fc !important',
+    // Border now handled inline
   },
   possibleMoveSquare: {
-    backgroundColor: '#86efac',
+    // backgroundColor: '#86efac',
+    // Border now handled inline
   },
   lastMoveSquare: {
-    backgroundColor: '#fbbf24',
+    // backgroundColor: '#fbbf24',
+    // Border now handled inline
   },
   piece: {
     color: '#000',
