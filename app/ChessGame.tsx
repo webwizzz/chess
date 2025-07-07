@@ -1,515 +1,839 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Socket } from "socket.io-client";
-import { getSocketInstance } from "../utils/socketManager";
-import GameControls from "./GameControls";
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
+import type { Socket } from "socket.io-client"
+import { getSocketInstance } from "../utils/socketManager"
+import GameControls from "./GameControls"
 
 // Types
 interface Player {
-  userId: string;
-  username: string;
-  rating: number;
-  avatar: string | null;
-  title: string | null;
+  userId: string
+  username: string
+  rating: number
+  avatar: string | null
+  title: string | null
 }
 
 interface GameState {
-  sessionId: string;
-  variantName: string;
-  subvariantName: string;
-  description: string;
+  sessionId: string
+  variantName: string
+  subvariantName: string
+  description: string
   players: {
-    white: Player;
-    black: Player;
-  };
+    white: Player
+    black: Player
+  }
   board: {
-    fen: string;
-    position: string;
-    activeColor: "white" | "black";
-    castlingRights: string;
-    enPassantSquare: string;
-    halfmoveClock: number;
-    fullmoveNumber: number;
-    whiteTime?: number;
-    blackTime?: number;
-    turnStartTimestamp?: number;
-    moveHistory?: { from: string; to: string; [key: string]: any }[];
-    repetitionMap?: any;
-  };
+    fen: string
+    position: string
+    activeColor: "white" | "black"
+    castlingRights: string
+    enPassantSquare: string
+    halfmoveClock: number
+    fullmoveNumber: number
+    whiteTime?: number
+    blackTime?: number
+    turnStartTimestamp?: number
+    lastMoveTimestamp?: number
+    moveHistory?: { from: string; to: string; [key: string]: any }[]
+    repetitionMap?: any
+    gameStarted?: boolean
+    firstMoveTimestamp?: number
+    capturedPieces?: {
+      white: string[]
+      black: string[]
+    }
+  }
   timeControl: {
-    type: string;
-    baseTime: number;
-    increment: number;
+    type: string
+    baseTime: number
+    increment: number
     timers: {
-      white: number;
-      black: number;
-    };
+      white: number
+      black: number
+    }
     flagged: {
-      white: boolean;
-      black: boolean;
-    };
-    timeSpent?: { white: any; black: any };
-  };
-  status: string;
-  result: string;
-  resultReason?: string | null;
-  winner?: string | null;
-  moves: any[];
-  moveCount: number;
-  lastMove: any;
+      white: boolean
+      black: boolean
+    }
+    timeSpent?: { white: any; black: any }
+  }
+  status: string
+  result: string
+  resultReason?: string | null
+  winner?: string | null
+  moves: any[]
+  moveCount: number
+  lastMove: any
   gameState: {
-    valid?: boolean;
-    move?: any;
-    state?: any;
-    result?: string;
-    check?: boolean;
-    checkmate?: boolean;
-    stalemate?: boolean;
-    insufficientMaterial?: boolean;
-    threefoldRepetition?: boolean;
-    fiftyMoveRule?: boolean;
-    canCastleKingside?: { white?: boolean; black?: boolean };
-    canCastleQueenside?: { white?: boolean; black?: boolean };
-    promotionAvailable?: boolean;
-    lastMove?: any;
-    winner?: string | null;
-    drawReason?: string | null;
-  };
+    valid?: boolean
+    move?: any
+    state?: any
+    result?: string
+    check?: boolean
+    checkmate?: boolean
+    stalemate?: boolean
+    insufficientMaterial?: boolean
+    threefoldRepetition?: boolean
+    fiftyMoveRule?: boolean
+    canCastleKingside?: { white?: boolean; black?: boolean }
+    canCastleQueenside?: { white?: boolean; black?: boolean }
+    promotionAvailable?: boolean
+    lastMove?: any
+    winner?: string | null
+    drawReason?: string | null
+  }
   userColor: {
-    [key: string]: "white" | "black";
-  };
-  positionHistory?: string[];
-  createdAt?: number;
-  lastActivity?: number;
-  startedAt?: number;
-  endedAt?: number | null;
-  rules?: any;
-  metadata?: any;
-  timers?: any;
+    [key: string]: "white" | "black"
+  }
+  positionHistory?: string[]
+  createdAt?: number
+  lastActivity?: number
+  startedAt?: number
+  endedAt?: number | null
+  rules?: any
+  metadata?: any
+  timers?: any
 }
 
 interface Move {
-  from: string;
-  to: string;
-  promotion?: string;
+  from: string
+  to: string
+  promotion?: string
 }
 
 interface ChessGameProps {
-  initialGameState: GameState;
-  userId: string;
+  initialGameState: GameState
+  userId: string
 }
 
 const PIECE_SYMBOLS = {
-  'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚', 'p': '♟',
-  'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔', 'P': '♙'
-};
+  r: "♜",
+  n: "♞",
+  b: "♝",
+  q: "♛",
+  k: "♚",
+  p: "♟",
+  R: "♖",
+  N: "♘",
+  B: "♗",
+  Q: "♕",
+  K: "♔",
+  P: "♙",
+}
 
-const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'];
+const PIECE_VALUES = {
+  p: 1,
+  P: 1,
+  n: 3,
+  N: 3,
+  b: 3,
+  B: 3,
+  r: 5,
+  R: 5,
+  q: 9,
+  Q: 9,
+  k: 0,
+  K: 0,
+}
+
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
+const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
 
 export default function ChessGame({ initialGameState, userId }: ChessGameProps) {
-  const [gameState, setGameState] = useState<GameState>(initialGameState);
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
-  const [possibleMoves, setPossibleMoves] = useState<string[]>([]);
-  const [isMyTurn, setIsMyTurn] = useState(false);
-  const [playerColor, setPlayerColor] = useState<"white" | "black">("white");
-  const [boardFlipped, setBoardFlipped] = useState(false);
-  const [moveHistory, setMoveHistory] = useState<string[]>([]);
-  const [showMoveHistory, setShowMoveHistory] = useState(false);
-  const [promotionModal, setPromotionModal] = useState<{ visible: boolean, from: string, to: string, options: string[] } | null>(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  // Timer sync state
-  function safeTimerValue(val: any): number {
-    const n = Number(val);
-    return isNaN(n) || n === undefined || n === null ? 0 : n;
-  }
-  const [localTimers, setLocalTimers] = useState<{white: number, black: number}>(
-    {
-      white: safeTimerValue(initialGameState.timeControl.timers.white),
-      black: safeTimerValue(initialGameState.timeControl.timers.black)
-    }
-  );
-  const lastBackendSync = useRef<{white: number, black: number, ts: number}>(
-    {
-      white: safeTimerValue(initialGameState.timeControl.timers.white),
-      black: safeTimerValue(initialGameState.timeControl.timers.black),
-      ts: Date.now()
-    }
-  );
+  const [gameState, setGameState] = useState<GameState>(initialGameState)
+  const [socket, setSocket] = useState<Socket | null>(null)
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
+  const [possibleMoves, setPossibleMoves] = useState<string[]>([])
+  const [isMyTurn, setIsMyTurn] = useState(false)
+  const [playerColor, setPlayerColor] = useState<"white" | "black">("white")
+  const [boardFlipped, setBoardFlipped] = useState(false)
+  const [moveHistory, setMoveHistory] = useState<string[]>([])
+  const [showMoveHistory, setShowMoveHistory] = useState(false)
+  const [promotionModal, setPromotionModal] = useState<{
+    visible: boolean
+    from: string
+    to: string
+    options: string[]
+  } | null>(null)
 
-  const screenWidth = Dimensions.get('window').width;
-  const boardSize = screenWidth - 40;
-  const squareSize = boardSize / 8;
+  // Timer management
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastUpdateRef = useRef<number>(Date.now())
+  const gameStartTimeRef = useRef<number | null>(null)
+  const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
+
+  // Timer sync state - improved timer management
+  function safeTimerValue(val: any): number {
+    const n = Number(val)
+    return isNaN(n) || n === undefined || n === null ? 0 : Math.max(0, n)
+  }
+
+  const [localTimers, setLocalTimers] = useState<{ white: number; black: number }>({
+    white: safeTimerValue(initialGameState.timeControl.timers.white),
+    black: safeTimerValue(initialGameState.timeControl.timers.black),
+  })
+
+  // Track the last known server state for accurate local countdown
+  const lastServerSync = useRef<{
+    white: number
+    black: number
+    activeColor: "white" | "black"
+    timestamp: number
+    turnStartTime: number
+    isFirstMove: boolean
+  }>({
+    white: safeTimerValue(initialGameState.timeControl.timers.white),
+    black: safeTimerValue(initialGameState.timeControl.timers.black),
+    activeColor: initialGameState.board.activeColor,
+    timestamp: Date.now(),
+    turnStartTime: Date.now(),
+    isFirstMove: true,
+  })
+
+  const screenWidth = Dimensions.get("window").width
+  const screenHeight = Dimensions.get("window").height
+  const isTablet = Math.min(screenWidth, screenHeight) > 600
+  const isSmallScreen = Math.min(screenWidth, screenHeight) < 400
+
+  // Calculate responsive sizes
+  const containerPadding = isTablet ? 24 : isSmallScreen ? 12 : 16
+  const boardSize = Math.min(screenWidth - containerPadding * 2, screenHeight * 0.5, isTablet ? 500 : 380)
+  const squareSize = boardSize / 8
+  const minTouchTarget = 44 // Minimum touch target size for accessibility
+
+  // Responsive text sizes
+  const baseFontSize = isTablet ? 18 : isSmallScreen ? 14 : 16
+  const titleFontSize = isTablet ? 24 : isSmallScreen ? 18 : 20
+  const smallFontSize = isTablet ? 14 : isSmallScreen ? 11 : 12
 
   useEffect(() => {
     // Set up game socket connection
-    const gameSocket = getSocketInstance();
+    const gameSocket = getSocketInstance()
     if (gameSocket) {
-      setSocket(gameSocket);
-      console.log("Connected to game socket");
+      setSocket(gameSocket)
+      console.log("Connected to game socket")
     }
-
-    if(!gameSocket) {
-      console.error("Failed to connect to game socket");
-        Alert.alert("Connection Error", "Failed to connect to game socket. Please try again.");
-        return;
+    if (!gameSocket) {
+      console.error("Failed to connect to game socket")
+      Alert.alert("Connection Error", "Failed to connect to game socket. Please try again.")
+      return
     }
 
     // Initial player color and board orientation
-    const userColor = gameState.userColor[userId];
-    const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white";
-    setPlayerColor(safePlayerColor);
-    setBoardFlipped(safePlayerColor === "black");
-    setIsMyTurn(gameState.board.activeColor === safePlayerColor);
+    const userColor = gameState.userColor[userId]
+    const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white"
+    setPlayerColor(safePlayerColor)
+    setBoardFlipped(safePlayerColor === "black")
+    setIsMyTurn(gameState.board.activeColor === safePlayerColor)
+
+    // Check if this is the first move based on move history
+    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
+    isFirstMoveRef.current = moveCount === 0
+
+    console.log("[INIT] Move count:", moveCount, "Is first move:", isFirstMoveRef.current)
+
+    // Initialize game start time
+    if (!gameStartTimeRef.current) {
+      gameStartTimeRef.current = Date.now()
+    }
 
     return () => {
       if (timerRef.current) {
-        clearInterval(timerRef.current);
+        clearInterval(timerRef.current)
       }
-    };
-  }, []);
+    }
+  }, [])
 
   // Always update playerColor and isMyTurn on every gameState change
   useEffect(() => {
-    const userColor = gameState.userColor[userId];
-    const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white";
-    setPlayerColor(safePlayerColor);
-    setBoardFlipped(safePlayerColor === "black");
-    setIsMyTurn(gameState.board.activeColor === safePlayerColor);
-    console.log("[DEBUG] userId:", userId, "userColor:", userColor, "playerColor:", safePlayerColor, "activeColor:", gameState.board.activeColor, "isMyTurn:", gameState.board.activeColor === safePlayerColor);
-  }, [gameState, userId]);
+    const userColor = gameState.userColor[userId]
+    const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white"
+    setPlayerColor(safePlayerColor)
+    setBoardFlipped(safePlayerColor === "black")
+    setIsMyTurn(gameState.board.activeColor === safePlayerColor)
+    console.log(
+      "[DEBUG] userId:",
+      userId,
+      "userColor:",
+      userColor,
+      "playerColor:",
+      safePlayerColor,
+      "activeColor:",
+      gameState.board.activeColor,
+      "isMyTurn:",
+      gameState.board.activeColor === safePlayerColor,
+    )
+  }, [gameState, userId])
 
   useEffect(() => {
-    if (!socket) return;
+    if (!socket) return
 
     // Listen for game events
-    socket.on("game:move", handleGameMove);
-    socket.on("game:possibleMoves", handlePossibleMoves);
-    socket.on("game:gameState", handleGameStateUpdate);
-    socket.on("game:timer", handleTimerUpdate);
-    socket.on("game:end", handleGameEnd);
-    socket.on("game:error", handleGameError);
+    socket.on("game:move", handleGameMove)
+    socket.on("game:possibleMoves", handlePossibleMoves)
+    socket.on("game:gameState", handleGameStateUpdate)
+    socket.on("game:timer", handleTimerUpdate)
+    socket.on("game:end", handleGameEnd)
+    socket.on("game:error", handleGameError)
 
     return () => {
-      socket.off("game:move", handleGameMove);
-      socket.off("game:possibleMoves", handlePossibleMoves);
-      socket.off("game:gameState", handleGameStateUpdate);
-      socket.off("game:timer", handleTimerUpdate);
-      socket.off("game:end", handleGameEnd);
-      socket.off("game:error", handleGameError);
-    };
-  }, [socket]);
+      socket.off("game:move", handleGameMove)
+      socket.off("game:possibleMoves", handlePossibleMoves)
+      socket.off("game:gameState", handleGameStateUpdate)
+      socket.off("game:timer", handleGameTimerUpdate)
+      socket.off("game:end", handleGameEnd)
+      socket.off("game:error", handleGameError)
+    }
+  }, [socket])
 
-  // Timer effect: smooth local countdown, resync on backend update
+  // Improved timer effect with proper turn-based countdown
   useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (gameState.status !== "active") return;
-    // Start local timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+    }
+
+    if (gameState.status !== "active") {
+      return
+    }
+
+    // Update server sync reference when game state changes
+    const now = Date.now()
+
+    // Use the most recent timer values from gameState
+    const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
+    const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
+
+    // Check if this is still the first move
+    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
+    const isFirstMove = moveCount === 0
+
+    lastServerSync.current = {
+      white: currentWhiteTime,
+      black: currentBlackTime,
+      activeColor: gameState.board.activeColor,
+      timestamp: now,
+      turnStartTime: gameState.board.turnStartTimestamp || now,
+      isFirstMove: isFirstMove,
+    }
+
+    console.log("[TIMER] Setting up timer for active color:", gameState.board.activeColor)
+    console.log("[TIMER] Move count:", moveCount, "Is first move:", isFirstMove)
+    console.log("[TIMER] Server sync values - White:", currentWhiteTime, "Black:", currentBlackTime)
+    console.log("[TIMER] Local timer values - White:", localTimers.white, "Black:", localTimers.black)
+
+    // Start local timer countdown
     timerRef.current = setInterval(() => {
-      setLocalTimers(prev => {
-        const now = Date.now();
-        const elapsed = now - lastBackendSync.current.ts;
-        const white = Math.max(0, safeTimerValue(lastBackendSync.current.white) - elapsed);
-        const black = Math.max(0, safeTimerValue(lastBackendSync.current.black) - elapsed);
-        return {white, black};
-      });
-    }, 1000);
+      const now = Date.now()
+      const serverSync = lastServerSync.current
+
+      // Calculate elapsed time since the server sync
+      const elapsedSinceSync = now - serverSync.timestamp
+
+      setLocalTimers((prev) => {
+        let newWhite = serverSync.white
+        let newBlack = serverSync.black
+
+        // CRITICAL: Only countdown for the active player, and only if it's not the first move
+        if (!serverSync.isFirstMove) {
+          if (serverSync.activeColor === "white") {
+            newWhite = Math.max(0, serverSync.white - elapsedSinceSync)
+            // Keep black time unchanged from server sync
+            newBlack = serverSync.black
+          } else if (serverSync.activeColor === "black") {
+            newBlack = Math.max(0, serverSync.black - elapsedSinceSync)
+            // Keep white time unchanged from server sync
+            newWhite = serverSync.white
+          }
+        } else {
+          // For the first move, don't countdown - just keep the initial values
+          newWhite = serverSync.white
+          newBlack = serverSync.black
+          console.log("[TIMER] First move - not counting down, keeping initial values")
+        }
+
+        // Only log significant changes to avoid spam
+        if (Math.abs(prev.white - newWhite) > 1000 || Math.abs(prev.black - newBlack) > 1000) {
+          console.log(
+            "[TIMER] Significant change - Active:",
+            serverSync.activeColor,
+            "White:",
+            Math.floor(newWhite / 1000),
+            "Black:",
+            Math.floor(newBlack / 1000),
+            "First move:",
+            serverSync.isFirstMove,
+          )
+        }
+
+        return { white: newWhite, black: newBlack }
+      })
+    }, 100) // Update every 100ms for smooth countdown
+
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [gameState.status, gameState.board.activeColor]);
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
+    }
+  }, [
+    gameState.status,
+    gameState.board.activeColor,
+    gameState.timeControl.timers.white,
+    gameState.timeControl.timers.black,
+    gameState.board.turnStartTimestamp,
+    gameState.moves?.length, // Add move count as dependency
+    gameState.board?.moveHistory?.length, // Add move history length as dependency
+  ])
 
-  // On every backend timer/game update, resync local timer base
-  useEffect(() => {
-    if (!gameState.timeControl || !gameState.timeControl.timers) return;
-    lastBackendSync.current = {
-      white: safeTimerValue(gameState.timeControl.timers.white),
-      black: safeTimerValue(gameState.timeControl.timers.black),
-      ts: Date.now(),
-    };
-    setLocalTimers({
-      white: safeTimerValue(gameState.timeControl.timers.white),
-      black: safeTimerValue(gameState.timeControl.timers.black),
-    });
-  }, [gameState.timeControl.timers.white, gameState.timeControl.timers.black]);
-
-  // Handles the 'game:move' event from the server
   const handleGameMove = (data: any) => {
-    // data: { move: {from, to, ...}, gameState: {...} }
-    console.log("Move received:", data);
+    console.log("[MOVE] Move received:", data)
     if (data && data.gameState) {
-      setGameState(prevState => ({
+      const now = Date.now()
+
+      // Check if this was the first move
+      const previousMoveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
+      const newMoveCount = data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0
+      const wasFirstMove = previousMoveCount === 0 && newMoveCount === 1
+
+      console.log(
+        "[MOVE] Previous move count:",
+        previousMoveCount,
+        "New move count:",
+        newMoveCount,
+        "Was first move:",
+        wasFirstMove,
+      )
+
+      // Extract timer values from the response - try multiple possible locations
+      let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white) // fallback to current
+      let newBlackTime = safeTimerValue(gameState.timeControl.timers.black) // fallback to current
+
+      // Try to get updated timer values from various possible locations in the response
+      if (data.gameState.timeControl?.timers?.white !== undefined) {
+        newWhiteTime = safeTimerValue(data.gameState.timeControl.timers.white)
+      } else if (data.gameState.board?.whiteTime !== undefined) {
+        newWhiteTime = safeTimerValue(data.gameState.board.whiteTime)
+      }
+
+      if (data.gameState.timeControl?.timers?.black !== undefined) {
+        newBlackTime = safeTimerValue(data.gameState.timeControl.timers.black)
+      } else if (data.gameState.board?.blackTime !== undefined) {
+        newBlackTime = safeTimerValue(data.gameState.board.blackTime)
+      }
+
+      console.log("[MOVE] Timer values from server - White:", newWhiteTime, "Black:", newBlackTime)
+      console.log("[MOVE] Previous local timers - White:", localTimers.white, "Black:", localTimers.black)
+
+      // For the first move, preserve the initial timer values and don't use the move response values
+      if (wasFirstMove) {
+        console.log("[MOVE] First move detected - preserving initial timer values")
+        newWhiteTime = localTimers.white
+        newBlackTime = localTimers.black
+      }
+
+      // CRITICAL: Update server sync reference with preserved values for first move
+      lastServerSync.current = {
+        white: newWhiteTime,
+        black: newBlackTime,
+        activeColor: data.gameState.board.activeColor, // This is whose turn it is NOW
+        timestamp: now,
+        turnStartTime: data.gameState.board.turnStartTimestamp || now,
+        isFirstMove: newMoveCount === 0, // Update first move status
+      }
+
+      console.log("[MOVE] Updated server sync - Active color:", data.gameState.board.activeColor)
+
+      setGameState((prevState) => ({
         ...prevState,
         ...data.gameState,
         board: {
           ...prevState.board,
           ...data.gameState.board,
         },
+        timeControl: {
+          ...prevState.timeControl,
+          ...data.gameState.timeControl,
+          timers: {
+            white: newWhiteTime,
+            black: newBlackTime,
+          },
+        },
         moves: data.gameState.moves || [],
         lastMove: data.gameState.lastMove,
         moveCount: data.gameState.moveCount,
-      }));
-      console.log("Updated game state:", data.gameState);
-      setMoveHistory(data.gameState.moves || []);
-      setSelectedSquare(null);
-      setPossibleMoves([]);
+      }))
+
+      // Update local timers with preserved values
+      setLocalTimers({
+        white: newWhiteTime,
+        black: newBlackTime,
+      })
+
+      console.log("[MOVE] Updated local timers to - White:", newWhiteTime, "Black:", newBlackTime)
+
+      setMoveHistory(data.gameState.moves || [])
+      setSelectedSquare(null)
+      setPossibleMoves([])
+
       // Use the updated activeColor from the new gameState
-      const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor;
-      const activeColor = data.gameState.board.activeColor;
-      setIsMyTurn(activeColor === userColor);
+      const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
+      const activeColor = data.gameState.board.activeColor
+      const newIsMyTurn = activeColor === userColor
+      setIsMyTurn(newIsMyTurn)
+
+      console.log(
+        "[MOVE] Turn update - Active color:",
+        activeColor,
+        "User color:",
+        userColor,
+        "Is my turn:",
+        newIsMyTurn,
+      )
     }
-  };
+  }
 
   // Handles the 'game:possibleMoves' event from the server
   const handlePossibleMoves = (data: { square: string; moves: any[] }) => {
-    // data.moves: array of Move objects from backend
-    console.log("Possible moves (raw):", data.moves);
-    // Extract the 'to' field from each move object
-    let moves: string[] = [];
+    console.log("Possible moves (raw):", data.moves)
+    let moves: string[] = []
     if (Array.isArray(data.moves) && data.moves.length > 0) {
-      if (typeof data.moves[0] === 'object' && data.moves[0].to) {
-        moves = data.moves.map((m: any) => m.to);
-      } else if (typeof data.moves[0] === 'string' && data.moves[0].length === 4) {
-        moves = data.moves.map((m: string) => m.slice(2, 4));
-      } else if (typeof data.moves[0] === 'string') {
-        moves = data.moves;
+      if (typeof data.moves[0] === "object" && data.moves[0].to) {
+        moves = data.moves.map((m: any) => m.to)
+      } else if (typeof data.moves[0] === "string" && data.moves[0].length === 4) {
+        moves = data.moves.map((m: string) => m.slice(2, 4))
+      } else if (typeof data.moves[0] === "string") {
+        moves = data.moves
       }
     }
-    console.log("Possible moves (dest squares):", moves);
-    setPossibleMoves(moves);
-  };
+    console.log("Possible moves (dest squares):", moves)
+    setPossibleMoves(moves)
+  }
 
   // Handles the 'game:gameState' event from the server
   const handleGameStateUpdate = (data: any) => {
-    // data: { gameState: {...} }
-    console.log("Game state update:", data);
+    console.log("Game state update:", data)
     if (data && data.gameState) {
-      setGameState(prevState => ({ ...prevState, ...data.gameState }));
-      setIsMyTurn(data.gameState.board.activeColor === playerColor);
-    }
-  };
+      // Update server sync reference
+      lastServerSync.current = {
+        white: safeTimerValue(data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime),
+        black: safeTimerValue(data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime),
+        activeColor: data.gameState.board.activeColor,
+        timestamp: Date.now(),
+        turnStartTime: data.gameState.board.turnStartTimestamp || Date.now(),
+        isFirstMove: (data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0) === 0,
+      }
 
-  // Handles the 'game:timer' event from the server
-  const handleTimerUpdate = (data: any) => {
-    // data: { timers: ..., black: ... }
-    console.log("Timer update:", data);
-    // Always coerce to numbers and fallback to previous if missing
-    setGameState(prevState => ({
+      setGameState((prevState) => ({
+        ...prevState,
+        ...data.gameState,
+        timeControl: {
+          ...prevState.timeControl,
+          ...data.gameState.timeControl,
+          timers: {
+            white: safeTimerValue(data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime),
+            black: safeTimerValue(data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime),
+          },
+        },
+      }))
+      setIsMyTurn(data.gameState.board.activeColor === playerColor)
+    }
+  }
+
+  const handleGameTimerUpdate = (data: any) => {
+    console.log("Timer update:", data)
+
+    // FIXED: Handle different timer update formats from server
+    let whiteTime: number
+    let blackTime: number
+
+    if (data.timers && typeof data.timers === "object") {
+      // Format: { timers: { white: number, black: number } }
+      whiteTime = safeTimerValue(data.timers.white)
+      blackTime = safeTimerValue(data.timers.black)
+    } else if (typeof data.timers === "number" && typeof data.black === "number") {
+      // Format: { timers: number, black: number } - timers is white time
+      whiteTime = safeTimerValue(data.timers)
+      blackTime = safeTimerValue(data.black)
+    } else {
+      // Fallback format: { white: number, black: number }
+      whiteTime = safeTimerValue(data.white ?? data.timers?.white)
+      blackTime = safeTimerValue(data.black ?? data.timers?.black)
+    }
+
+    console.log("[TIMER UPDATE] Parsed values - White:", whiteTime, "Black:", blackTime)
+
+    // Check if this is still the first move
+    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
+    const isFirstMove = moveCount === 0
+
+    // Update server sync reference with the correct values
+    lastServerSync.current = {
+      white: whiteTime,
+      black: blackTime,
+      activeColor: gameState.board.activeColor,
+      timestamp: Date.now(),
+      turnStartTime: Date.now(), // Reset turn start time on timer update
+      isFirstMove: isFirstMove,
+    }
+
+    // Update local timers immediately
+    setLocalTimers({
+      white: whiteTime,
+      black: blackTime,
+    })
+
+    setGameState((prevState) => ({
       ...prevState,
       timeControl: {
         ...prevState.timeControl,
         timers: {
-          white: safeTimerValue(data?.timers?.white ?? data?.white ?? prevState.timeControl.timers.white),
-          black: safeTimerValue(data?.timers?.black ?? data?.black ?? prevState.timeControl.timers.black)
-        }
-      }
-    }));
-  };
+          white: whiteTime,
+          black: blackTime,
+        },
+      },
+    }))
+
+    console.log(
+      "[TIMER UPDATE] Updated local timers to - White:",
+      whiteTime,
+      "Black:",
+      blackTime,
+      "Is first move:",
+      isFirstMove,
+    )
+  }
+
+  // Handles the 'game:timer' event from the server
+  const handleTimerUpdate = (data: any) => {
+    handleGameTimerUpdate(data)
+  }
 
   // Handles the 'game:end' event from the server
   const handleGameEnd = (data: any) => {
-    // data: { gameState: {...} }
-    console.log("Game ended:", data);
+    console.log("Game ended:", data)
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+    }
     if (data && data.gameState) {
-      setGameState(prevState => ({
+      setGameState((prevState) => ({
         ...prevState,
         ...data.gameState,
-        status: "ended"
-      }));
-      Alert.alert("Game Over", `Result: ${data.gameState.result || "Game ended"}`);
+        status: "ended",
+      }))
+      Alert.alert("Game Over", `Result: ${data.gameState.result || "Game ended"}`)
     }
-  };
+  }
 
   // Handles the 'game:error' event from the server
   const handleGameError = (data: any) => {
-    // data: { message: "Error message" }
-    console.log("Game error:", data);
-    Alert.alert("Error", data.message || data.error || "An error occurred");
-  };
+    console.log("Game error:", data)
+    Alert.alert("Error", data.message || data.error || "An error occurred")
+  }
 
   // Emits a request for possible moves for a square
   const requestPossibleMoves = (square: string) => {
-    if (!socket) return;
+    if (!socket) return
     socket.emit("game:getPossibleMoves", {
-      square: square
-    });
-  };
-
-  // Helper to update the board position string for a simple move (no castling, no en passant, no promotion)
-  function updatePositionString(position: string, from: string, to: string): string {
-    // position: FEN piece placement part (e.g. rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR)
-    // from, to: e.g. 'e2', 'e4'
-    // Returns new position string after moving piece from 'from' to 'to'
-    let pos = position.replace(/\//g, '');
-    const files = FILES;
-    const ranks = RANKS;
-    const fromFile = files.indexOf(from[0]);
-    const fromRank = ranks.indexOf(from[1]);
-    const toFile = files.indexOf(to[0]);
-    const toRank = ranks.indexOf(to[1]);
-    if (fromFile === -1 || fromRank === -1 || toFile === -1 || toRank === -1) return position;
-    const fromIdx = fromRank * 8 + fromFile;
-    const toIdx = toRank * 8 + toFile;
-    let arr = pos.split('');
-    arr[toIdx] = arr[fromIdx];
-    arr[fromIdx] = '1';
-    // Collapse consecutive '1's into numbers and re-insert slashes every 8 chars
-    let collapsed = '';
-    for (let i = 0; i < 8; i++) {
-      let row = arr.slice(i * 8, (i + 1) * 8).join('');
-      row = row.replace(/1{1,8}/g, m => m.length.toString());
-      collapsed += row;
-      if (i < 7) collapsed += '/';
-    }
-    return collapsed;
+      square: square,
+    })
   }
 
   // Emits a move to the server in the required format
   const makeMove = (move: Move) => {
-    console.log('[DEBUG] Attempting to make move', move, 'isMyTurn:', isMyTurn, 'playerColor:', playerColor, 'activeColor:', gameState.board.activeColor);
+    console.log(
+      "[DEBUG] Attempting to make move",
+      move,
+      "isMyTurn:",
+      isMyTurn,
+      "playerColor:",
+      playerColor,
+      "activeColor:",
+      gameState.board.activeColor,
+    )
     if (!socket || !isMyTurn) {
-      console.log('[DEBUG] Not emitting move: socket or isMyTurn false');
-      return;
+      console.log("[DEBUG] Not emitting move: socket or isMyTurn false")
+      return
     }
-    setIsMyTurn(false);
-    setSelectedSquare(null);
-    setPossibleMoves([]);
+
+    // Immediately update local state to show move was made (optimistic update)
+    setIsMyTurn(false)
+    setSelectedSquare(null)
+    setPossibleMoves([])
+
     socket.emit("game:makeMove", {
       move: { from: move.from, to: move.to, promotion: move.promotion },
-      timestamp: Date.now()
-    });
-    console.log('[DEBUG] Move emitted:', { from: move.from, to: move.to, promotion: move.promotion });
-  };
+      timestamp: Date.now(),
+    })
+    console.log("[DEBUG] Move emitted:", { from: move.from, to: move.to, promotion: move.promotion })
+  }
 
   const handleSquarePress = (square: string) => {
     if (selectedSquare === square) {
       // Deselect if clicking the same square
-      setSelectedSquare(null);
-      setPossibleMoves([]);
-      return;
+      setSelectedSquare(null)
+      setPossibleMoves([])
+      return
     }
 
     if (selectedSquare && possibleMoves.includes(square)) {
       // Check if this move is a promotion
-      // Find all possible moves for selectedSquare to this square
-      const allMoves = (gameState && gameState.moves) ? gameState.moves : [];
-      // But better: use the last possibleMoves event, which is more accurate
-      // So, let's keep the last possibleMoves data in a ref
-      // But for now, let's check for promotion in the backend's possible moves
-      let promotionOptions: string[] = [];
-      if (Array.isArray(gameState && gameState.board && gameState.board.moveHistory)) {
-        // Not reliable for current move, so use below
+      const promotionOptions: string[] = []
+
+      // Check for promotion moves (simplified logic)
+      const piece = getPieceAt(selectedSquare)
+      const isPromotion =
+        piece &&
+        ((piece.toLowerCase() === "p" && playerColor === "white" && square[1] === "8") ||
+          (piece.toLowerCase() === "p" && playerColor === "black" && square[1] === "1"))
+
+      if (isPromotion) {
+        const options = ["q", "r", "b", "n"] // queen, rook, bishop, knight
+        setPromotionModal({ visible: true, from: selectedSquare, to: square, options })
+        return
       }
-      // Use possibleMoves from last request
-      if (Array.isArray(possibleMoves) && possibleMoves.length > 0) {
-        // But we need the full move objects, not just squares
-        // So, let's use the last possibleMoves event if we can
-      }
-      // Instead, let's use the last possibleMoves event, but we need to store the full move objects
-      // Let's add a ref to store the last full move objects
-      // We'll add this at the top:
-      // const lastPossibleMoveObjects = useRef<any[]>([]);
-      // And update it in handlePossibleMoves
-      // For now, let's just check for promotion using the backend's move list
-      let promotionMoves = [];
-      if (Array.isArray(gameState && gameState.moves)) {
-        promotionMoves = gameState.moves.filter((m: any) => m.from === selectedSquare && m.to === square && m.promotion);
-      }
-      if (promotionMoves.length > 0) {
-        // Multiple promotion options, show modal
-        const options = promotionMoves.map((m: any) => m.promotion).filter((v: any, i: number, arr: any[]) => arr.indexOf(v) === i);
-        setPromotionModal({ visible: true, from: selectedSquare, to: square, options });
-        return;
-      }
-      // Only allow moves that are in possibleMoves
-      makeMove({ from: selectedSquare, to: square });
-      setSelectedSquare(null);
-      setPossibleMoves([]);
-      return;
+
+      makeMove({ from: selectedSquare, to: square })
+      setSelectedSquare(null)
+      setPossibleMoves([])
+      return
     }
 
     // Only allow selecting a piece if it's the player's turn and the piece belongs to them
-    const piece = getPieceAt(square);
+    const piece = getPieceAt(square)
     if (isMyTurn && piece && isPieceOwnedByPlayer(piece, playerColor)) {
-      setSelectedSquare(square);
-      requestPossibleMoves(square);
+      setSelectedSquare(square)
+      requestPossibleMoves(square)
     } else {
-      setSelectedSquare(null);
-      setPossibleMoves([]);
+      setSelectedSquare(null)
+      setPossibleMoves([])
     }
-  };
+  }
 
   // Handle promotion selection
   const handlePromotionSelect = (promotion: string) => {
     if (promotionModal) {
-      makeMove({ from: promotionModal.from, to: promotionModal.to, promotion });
-      setPromotionModal(null);
-      setSelectedSquare(null);
-      setPossibleMoves([]);
+      makeMove({ from: promotionModal.from, to: promotionModal.to, promotion })
+      setPromotionModal(null)
+      setSelectedSquare(null)
+      setPossibleMoves([])
     }
-  };
+  }
 
   // Correct FEN parsing for piece lookup
   const getPieceAt = (square: string): string | null => {
-    const fileIndex = FILES.indexOf(square[0]);
-    const rankIndex = RANKS.indexOf(square[1]);
-    if (fileIndex === -1 || rankIndex === -1) return null;
-    const fen = gameState.board.fen || gameState.board.position;
-    if (!fen) return null;
+    const fileIndex = FILES.indexOf(square[0])
+    const rankIndex = RANKS.indexOf(square[1])
+    if (fileIndex === -1 || rankIndex === -1) return null
+
+    const fen = gameState.board.fen || gameState.board.position
+    if (!fen) return null
+
     // Only use the piece placement part (before first space)
-    const piecePlacement = fen.split(' ')[0];
-    const rows = piecePlacement.split('/');
-    if (rows.length !== 8) return null;
-    const row = rows[rankIndex];
-    let col = 0;
+    const piecePlacement = fen.split(" ")[0]
+    const rows = piecePlacement.split("/")
+    if (rows.length !== 8) return null
+
+    const row = rows[rankIndex]
+    let col = 0
     for (let i = 0; i < row.length; i++) {
-      const c = row[i];
-      if (c >= '1' && c <= '8') {
-        col += parseInt(c);
+      const c = row[i]
+      if (c >= "1" && c <= "8") {
+        col += Number.parseInt(c)
       } else {
         if (col === fileIndex) {
-          return c;
+          return c
         }
-        col++;
+        col++
       }
     }
-    return null;
-  };
+    return null
+  }
 
   const isPieceOwnedByPlayer = (piece: string, color: "white" | "black"): boolean => {
     if (color === "white") {
-      return piece === piece.toUpperCase();
+      return piece === piece.toUpperCase()
     } else {
-      return piece === piece.toLowerCase();
+      return piece === piece.toLowerCase()
     }
-  };
+  }
 
   const formatTime = (milliseconds: number): string => {
-    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return '0:00';
-    const totalSeconds = Math.floor(milliseconds / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0:00"
+    const totalSeconds = Math.floor(milliseconds / 1000)
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`
+  }
+
+  // Calculate material advantage
+  const calculateMaterialAdvantage = () => {
+    const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
+
+    let whiteAdvantage = 0
+    let blackAdvantage = 0
+
+    capturedPieces.white.forEach((piece) => {
+      whiteAdvantage += PIECE_VALUES[piece.toLowerCase() as keyof typeof PIECE_VALUES] || 0
+    })
+
+    capturedPieces.black.forEach((piece) => {
+      blackAdvantage += PIECE_VALUES[piece.toUpperCase() as keyof typeof PIECE_VALUES] || 0
+    })
+
+    return { white: whiteAdvantage, black: blackAdvantage }
+  }
+
+  const renderCapturedPieces = (color: "white" | "black") => {
+    const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
+    const pieces = capturedPieces[color] || []
+
+    if (pieces.length === 0) return null
+
+    // Group pieces by type and count them
+    const pieceCounts: { [key: string]: number } = {}
+    pieces.forEach((piece) => {
+      const pieceType = color === "white" ? piece.toLowerCase() : piece.toUpperCase()
+      pieceCounts[pieceType] = (pieceCounts[pieceType] || 0) + 1
+    })
+
+    return (
+      <View style={styles.capturedPieces}>
+        {Object.entries(pieceCounts).map(([piece, count]) => (
+          <View key={piece} style={styles.capturedPieceGroup}>
+            <Text style={styles.capturedPiece}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>
+            {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
+          </View>
+        ))}
+      </View>
+    )
+  }
 
   const renderSquare = (file: string, rank: string) => {
-    const square = `${file}${rank}`;
-    const isLight = (FILES.indexOf(file) + parseInt(rank)) % 2 === 0;
-    const isSelected = selectedSquare === square;
-    const isPossibleMove = possibleMoves.includes(square);
+    const square = `${file}${rank}`
+    const isLight = (FILES.indexOf(file) + Number.parseInt(rank)) % 2 === 0
+    const isSelected = selectedSquare === square
+    const isPossibleMove = possibleMoves.includes(square)
+
     // Use the last move from moveHistory if available
-    let lastMoveObj = null;
+    let lastMoveObj = null
     if (gameState.board && Array.isArray(gameState.board.moveHistory) && gameState.board.moveHistory.length > 0) {
-      lastMoveObj = gameState.board.moveHistory[gameState.board.moveHistory.length - 1];
-    } else if (gameState.lastMove && typeof gameState.lastMove === 'object' && gameState.lastMove.from && gameState.lastMove.to) {
-      lastMoveObj = gameState.lastMove;
+      lastMoveObj = gameState.board.moveHistory[gameState.board.moveHistory.length - 1]
+    } else if (
+      gameState.lastMove &&
+      typeof gameState.lastMove === "object" &&
+      gameState.lastMove.from &&
+      gameState.lastMove.to
+    ) {
+      lastMoveObj = gameState.lastMove
     }
-    let isLastMove = false;
+
+    let isLastMove = false
     if (lastMoveObj && lastMoveObj.from && lastMoveObj.to) {
-      isLastMove = (lastMoveObj.from === square || lastMoveObj.to === square);
+      isLastMove = lastMoveObj.from === square || lastMoveObj.to === square
     }
-    const piece = getPieceAt(square);
+
+    const piece = getPieceAt(square)
 
     return (
       <TouchableOpacity
@@ -519,172 +843,263 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
           {
             width: squareSize,
             height: squareSize,
-            backgroundColor: isLight ? '#F0D9B5' : '#B58863',
-            borderWidth: isPossibleMove ? 4 : isSelected ? 3 : isLastMove ? 3 : 0,
-            borderColor: isPossibleMove
-              ? '#22c55e'
-              : isSelected
-              ? '#7dd3fc'
-              : isLastMove
-              ? '#fbbf24'
-              : 'transparent',
+            backgroundColor: isLight ? "#F0D9B5" : "#B58863",
+            borderWidth: isPossibleMove ? 3 : isSelected ? 3 : isLastMove ? 2 : 0,
+            borderColor: isPossibleMove ? "#4ade80" : isSelected ? "#60a5fa" : isLastMove ? "#fbbf24" : "transparent",
           },
         ]}
         onPress={() => handleSquarePress(square)}
       >
+        {/* Coordinate labels */}
+        {file === "a" && (
+          <Text style={[styles.coordinateLabel, styles.rankLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
+            {rank}
+          </Text>
+        )}
+        {rank === "1" && (
+          <Text style={[styles.coordinateLabel, styles.fileLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
+            {file}
+          </Text>
+        )}
+
         {piece && (
-          <Text style={[styles.piece, { fontSize: squareSize * 0.7 }]}>
+          <Text
+            style={[
+              styles.piece,
+              {
+                fontSize: Math.min(squareSize * 0.7, isTablet ? 40 : isSmallScreen ? 24 : 32),
+              },
+            ]}
+          >
             {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
           </Text>
         )}
         {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
+        {isPossibleMove && piece && <View style={styles.captureIndicator} />}
       </TouchableOpacity>
-    );
-  };
-
+    )
+  }
 
   // Render game info (check, checkmate, stalemate, etc.)
   const renderGameInfo = () => {
-    const gs = gameState.gameState || {};
+    const gs = gameState.gameState || {}
+
     if (gs.checkmate) {
-      return <Text style={styles.checkmateText}>Checkmate! {gameState.winner ? (gameState.winner === playerColor ? 'You win!' : 'You lose!') : ''}</Text>;
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.checkmateText}>♔ CHECKMATE! ♔</Text>
+          <Text style={styles.gameResultText}>
+            {gameState.winner ? (gameState.winner === playerColor ? "🎉 You Win!" : "😔 You Lose") : "Game Over"}
+          </Text>
+        </View>
+      )
     }
     if (gs.stalemate) {
-      return <Text style={styles.stalemateText}>Stalemate</Text>;
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.stalemateText}>⚖️ STALEMATE ⚖️</Text>
+          <Text style={styles.gameResultText}>Draw</Text>
+        </View>
+      )
     }
     if (gs.check) {
-      return <Text style={styles.checkText}>Check</Text>;
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.checkText}>⚠️ CHECK! ⚠️</Text>
+        </View>
+      )
     }
     if (gs.insufficientMaterial) {
-      return <Text style={styles.stalemateText}>Draw: Insufficient Material</Text>;
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.stalemateText}>⚖️ DRAW ⚖️</Text>
+          <Text style={styles.gameResultText}>Insufficient Material</Text>
+        </View>
+      )
     }
     if (gs.threefoldRepetition) {
-      return <Text style={styles.stalemateText}>Draw: Threefold Repetition</Text>;
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.stalemateText}>⚖️ DRAW ⚖️</Text>
+          <Text style={styles.gameResultText}>Threefold Repetition</Text>
+        </View>
+      )
     }
     if (gs.fiftyMoveRule) {
-      return <Text style={styles.stalemateText}>Draw: 50-move Rule</Text>;
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.stalemateText}>⚖️ DRAW ⚖️</Text>
+          <Text style={styles.gameResultText}>50-Move Rule</Text>
+        </View>
+      )
     }
-    if (gs.promotionAvailable) {
-      return <Text style={styles.checkText}>Promotion Available</Text>;
+    if (gameState.result && gameState.result !== "ongoing") {
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.stalemateText}>🏁 GAME OVER 🏁</Text>
+          <Text style={styles.gameResultText}>{gameState.result}</Text>
+        </View>
+      )
     }
-    if (gameState.result && gameState.result !== 'ongoing') {
-      return <Text style={styles.stalemateText}>Game Over: {gameState.result}</Text>;
-    }
-    return null;
-  };
+
+    // Show whose turn it is
+    const activePlayerName = gameState.players[gameState.board.activeColor]?.username || gameState.board.activeColor
+    const isMyTurnActive = gameState.board.activeColor === playerColor
+
+    return (
+      <View style={styles.gameStatusContainer}>
+        <Text style={[styles.turnIndicator, isMyTurnActive && styles.myTurnIndicator]}>
+          {isMyTurnActive ? "🎯 Your Turn" : `⏳ ${activePlayerName}'s Turn`}
+        </Text>
+      </View>
+    )
+  }
 
   const renderBoard = () => {
-    const files = boardFlipped ? [...FILES].reverse() : FILES;
-    const ranks = boardFlipped ? [...RANKS].reverse() : RANKS;
-    return (
-      <View style={styles.board}>
-        {ranks.map((rank) => (
-          <View key={rank} style={styles.row}>
-            {files.map((file) => renderSquare(file, rank))}
-          </View>
-        ))}
-      </View>
-    );
-  };
+    const files = boardFlipped ? [...FILES].reverse() : FILES
+    const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
-  const renderPlayerInfo = (color: "white" | "black", isTop: boolean) => {
-    const player = gameState.players[color];
+    return (
+      <View style={styles.boardContainer}>
+        <View style={styles.board}>
+          {ranks.map((rank) => (
+            <View key={rank} style={styles.row}>
+              {files.map((file) => renderSquare(file, rank))}
+            </View>
+          ))}
+        </View>
+      </View>
+    )
+  }
+
+  const renderPlayerInfo = (color: "white" | "black") => {
+    const player = gameState.players[color]
     if (!player) {
-      console.warn("Player Info undefined for color:", color, gameState.players);
       return (
-        <View style={[styles.playerInfo, isTop && styles.playerInfoTop]}>
+        <View style={styles.playerInfoContainer}>
           <Text style={styles.playerName}>Unknown Player</Text>
         </View>
-      );
+      )
     }
-    // Use localTimers for smooth UI, fallback to backend if needed
-    const timer = safeTimerValue(localTimers[color] !== undefined ? localTimers[color] : gameState.timeControl.timers[color]);
-    const isActive = gameState.board.activeColor === color;
-    const isMe = playerColor === color;
+
+    // Use localTimers for smooth UI countdown
+    const timer = safeTimerValue(localTimers[color])
+    const isActive = gameState.board.activeColor === color && gameState.status === "active"
+    const isMe = playerColor === color
+    const materialAdvantage = calculateMaterialAdvantage()
+    const advantage = materialAdvantage[color] - materialAdvantage[color === "white" ? "black" : "white"]
 
     return (
-      <View style={[styles.playerInfo, isTop && styles.playerInfoTop]}>
-        <View style={styles.playerLeft}>
-          <Text style={[styles.playerName, isActive && styles.activePlayer]}>
-            {player.username} {isMe && '(You)'}
-          </Text>
-          <Text style={styles.playerRating}>
-            {player.rating > 0 ? `(${player.rating})` : '(Unrated)'}
-          </Text>
+      <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
+        <View style={styles.playerHeader}>
+          <View style={styles.playerDetails}>
+            <View style={styles.playerNameRow}>
+              <Text
+                style={[
+                  styles.playerColorIndicator,
+                  { color: color === "white" ? "#fff" : "#000", backgroundColor: color === "white" ? "#000" : "#fff" },
+                ]}
+              >
+                {color === "white" ? "♔" : "♚"}
+              </Text>
+              <Text style={[styles.playerName, isActive && styles.activePlayerName]}>{player.username}</Text>
+              {isMe && <Text style={styles.youIndicator}>(You)</Text>}
+            </View>
+            <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
+            {advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
+          </View>
+
+          <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
+            <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
+          </View>
         </View>
-        <View style={[styles.timer, isActive && styles.activeTimer]}>
-          <Text style={[styles.timerText, isActive && styles.activeTimerText]}>
-            {formatTime(timer)}
-          </Text>
-        </View>
-        {isMe && isActive && (
-          <Text style={styles.yourTurnText}>Your Turn</Text>
-        )}
-        {isMe && !isActive && (
-          <Text style={styles.waitingText}>Opponent's Turn</Text>
-        )}
+
+        {renderCapturedPieces(color)}
+
+        {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
       </View>
-    );
-  };
+    )
+  }
 
   const renderMoveHistory = () => {
-    if (!showMoveHistory) return null;
-    
-    const moves = moveHistory;
-    const movePairs = [];
-    
+    if (!showMoveHistory) return null
+
+    const moves = moveHistory
+    const movePairs = []
+
     for (let i = 0; i < moves.length; i += 2) {
       movePairs.push({
         moveNumber: Math.floor(i / 2) + 1,
         white: moves[i],
-        black: moves[i + 1] || ''
-      });
+        black: moves[i + 1] || "",
+      })
     }
-    
+
     return (
-      <View style={styles.moveHistoryContainer}>
-        <View style={styles.moveHistoryHeader}>
-          <Text style={styles.moveHistoryTitle}>Move History</Text>
-          <TouchableOpacity onPress={() => setShowMoveHistory(false)}>
-            <Text style={styles.closeButton}>✕</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView style={styles.moveHistoryScroll}>
-          {movePairs.map((pair, index) => (
-            <View key={index} style={styles.moveRow}>
-              <Text style={styles.moveNumber}>{pair.moveNumber}.</Text>
-              <Text style={styles.moveText}>{pair.white}</Text>
-              <Text style={styles.moveText}>{pair.black}</Text>
+      <Modal visible={showMoveHistory} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.moveHistoryModal}>
+            <View style={styles.moveHistoryHeader}>
+              <Text style={styles.moveHistoryTitle}>📜 Move History</Text>
+              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
             </View>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  };
+            <ScrollView style={styles.moveHistoryScroll}>
+              {movePairs.map((pair, index) => (
+                <View key={index} style={styles.moveRow}>
+                  <Text style={styles.moveNumber}>{pair.moveNumber}.</Text>
+                  <Text style={styles.moveText}>{pair.white}</Text>
+                  <Text style={styles.moveText}>{pair.black}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    )
+  }
 
   const handleFlipBoard = () => {
-    setBoardFlipped(!boardFlipped);
-  };
+    setBoardFlipped(!boardFlipped)
+  }
 
-  const opponentColor = playerColor === "white" ? "black" : "white";
-  const topPlayer = boardFlipped ? playerColor : opponentColor;
-  const bottomPlayer = boardFlipped ? opponentColor : playerColor;
+  // Determine player positions based on color and board orientation
+  const topPlayerColor = boardFlipped ? playerColor : playerColor === "white" ? "black" : "white"
+  const bottomPlayerColor = boardFlipped ? (playerColor === "white" ? "black" : "white") : playerColor
 
   return (
     <View style={styles.container}>
-      {renderPlayerInfo(topPlayer, true)}
+      {/* Top Player */}
+      {renderPlayerInfo(topPlayerColor)}
+
+      {/* Game Status */}
       {renderGameInfo()}
+
+      {/* Chess Board */}
       {renderBoard()}
-      {renderPlayerInfo(bottomPlayer, false)}
-      <GameControls
-        socket={socket}
-        sessionId={gameState.sessionId}
-        gameStatus={gameState.status}
-        canResign={gameState.status === "active"}
-        canOfferDraw={gameState.status === "active"}
-        onFlipBoard={handleFlipBoard}
-      />
+
+      {/* Bottom Player */}
+      {renderPlayerInfo(bottomPlayerColor)}
+
+      {/* Game Controls */}
+      <View style={styles.controlsContainer}>
+        <GameControls
+          socket={socket}
+          sessionId={gameState.sessionId}
+          gameStatus={gameState.status}
+          canResign={gameState.status === "active"}
+          canOfferDraw={gameState.status === "active"}
+          onFlipBoard={handleFlipBoard}
+        />
+        <TouchableOpacity style={styles.historyButton} onPress={() => setShowMoveHistory(true)}>
+          <Text style={styles.historyButtonText}>📜 History</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Move History Modal */}
       {renderMoveHistory()}
+
       {/* Promotion Modal */}
       <Modal
         visible={!!promotionModal && promotionModal.visible}
@@ -692,218 +1107,417 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
         animationType="fade"
         onRequestClose={() => setPromotionModal(null)}
       >
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <View style={{ backgroundColor: '#23272A', padding: 24, borderRadius: 12, alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12 }}>Choose promotion piece</Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
-              {promotionModal && promotionModal.options.map((p) => (
-                <TouchableOpacity
-                  key={p}
-                  style={{ margin: 8, padding: 12, backgroundColor: '#36393F', borderRadius: 8 }}
-                  onPress={() => handlePromotionSelect(p)}
-                >
-                  <Text style={{ color: '#fff', fontSize: 24 }}>{PIECE_SYMBOLS[p.toUpperCase()] || p.toUpperCase()}</Text>
-                </TouchableOpacity>
-              ))}
+        <View style={styles.modalOverlay}>
+          <View style={styles.promotionModal}>
+            <Text style={styles.promotionTitle}>👑 Choose Promotion Piece</Text>
+            <View style={styles.promotionOptions}>
+              {promotionModal &&
+                promotionModal.options.map((p) => (
+                  <TouchableOpacity key={p} style={styles.promotionOption} onPress={() => handlePromotionSelect(p)}>
+                    <Text style={styles.promotionPiece}>
+                      {
+                        PIECE_SYMBOLS[
+                          (playerColor === "white" ? p.toUpperCase() : p.toLowerCase()) as keyof typeof PIECE_SYMBOLS
+                        ]
+                      }
+                    </Text>
+                  </TouchableOpacity>
+                ))}
             </View>
-            <TouchableOpacity onPress={() => setPromotionModal(null)} style={{ marginTop: 16 }}>
-              <Text style={{ color: '#b0b3b8' }}>Cancel</Text>
+            <TouchableOpacity onPress={() => setPromotionModal(null)} style={styles.cancelButton}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
     </View>
-  );
+  )
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#23272A',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    backgroundColor: "#1a1a2e",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16, // containerPadding
+    minHeight: 300, // screenHeight
   },
-  playerInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#2C2F33',
-    borderRadius: 8,
-    marginVertical: 5,
+  playerInfoContainer: {
+    width: "100%",
+    maxWidth: 500, // isTablet ? 500 : 400
+    backgroundColor: "#16213e",
+    borderRadius: 12, // isTablet ? 16 : 12
+    padding: 16, // isTablet ? 20 : isSmallScreen ? 12 : 16
+    marginVertical: 8, // isTablet ? 12 : 8
+    borderWidth: 2,
+    borderColor: "#0f3460",
+    minHeight: 80, // isTablet ? 100 : isSmallScreen ? 70 : 80
   },
-  playerInfoTop: {
-    marginBottom: 10,
+  activePlayerContainer: {
+    borderColor: "#4ade80",
+    backgroundColor: "#1e3a2e",
+    shadowColor: "#4ade80",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8, // isTablet ? 12 : 8
+    elevation: 8, // isTablet ? 12 : 8
   },
-  playerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  playerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8, // isTablet ? 12 : 8
+    minHeight: 44, // minTouchTarget
+  },
+  playerDetails: {
+    flex: 1,
+    marginRight: 12, // isTablet ? 16 : 12
+  },
+  playerNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6, // isTablet ? 6 : 4
+    flexWrap: "wrap",
+  },
+  playerColorIndicator: {
+    fontSize: 20, // isTablet ? 24 : isSmallScreen ? 16 : 20
+    fontWeight: "bold",
+    marginRight: 12, // isTablet ? 12 : 8
+    paddingHorizontal: 10, // isTablet ? 10 : 8
+    paddingVertical: 4, // isTablet ? 4 : 2
+    borderRadius: 6, // isTablet ? 6 : 4
+    minWidth: 35.2, // minTouchTarget * 0.8
+    textAlign: "center",
   },
   playerName: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginRight: 8,
+    color: "#e2e8f0",
+    fontSize: 18, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontWeight: "bold",
+    marginRight: 12, // isTablet ? 12 : 8
+    flexShrink: 1,
   },
-  activePlayer: {
-    color: '#00A862',
+  activePlayerName: {
+    color: "#4ade80",
+  },
+  youIndicator: {
+    color: "#60a5fa",
+    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontStyle: "italic",
   },
   playerRating: {
-    color: '#b0b3b8',
-    fontSize: 14,
+    color: "#94a3b8",
+    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    marginBottom: 6, // isTablet ? 6 : 4
   },
-  timer: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#36393F',
-    borderRadius: 4,
+  materialAdvantage: {
+    color: "#4ade80",
+    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontWeight: "bold",
+  },
+  timerContainer: {
+    backgroundColor: "#0f172a",
+    paddingHorizontal: 16, // isTablet ? 16 : 12
+    paddingVertical: 12, // isTablet ? 12 : 8
+    borderRadius: 10, // isTablet ? 10 : 8
     borderWidth: 1,
-    borderColor: '#40444B',
+    borderColor: "#334155",
+    minWidth: 120, // isTablet ? 120 : 100
+    minHeight: 44, // minTouchTarget
+    justifyContent: "center",
+    alignItems: "center",
   },
-  activeTimer: {
-    backgroundColor: '#00A862',
-    borderColor: '#00A862',
+  activeTimerContainer: {
+    backgroundColor: "#4ade80",
+    borderColor: "#4ade80",
   },
   timerText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: "#e2e8f0",
+    fontSize: 16, // isTablet ? 18 : isSmallScreen ? 14 : 16
+    fontWeight: "bold",
+    textAlign: "center",
   },
   activeTimerText: {
-    color: '#000',
+    color: "#000",
   },
-  gameInfo: {
-    alignItems: 'center',
-    marginVertical: 10,
+  capturedPieces: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8, // isTablet ? 12 : 8
+    minHeight: 30, // isTablet ? 30 : 20
   },
-  gameTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+  capturedPieceGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 12, // isTablet ? 16 : 12
+    marginBottom: 6, // isTablet ? 6 : 4
   },
-  gameDescription: {
-    color: '#b0b3b8',
-    fontSize: 12,
-    marginTop: 2,
+  capturedPiece: {
+    fontSize: 16, // isTablet ? 20 : isSmallScreen ? 14 : 16
+    color: "#94a3b8",
+  },
+  capturedCount: {
+    fontSize: 12, // isTablet ? 14 : isSmallScreen ? 10 : 12
+    color: "#60a5fa",
+    marginLeft: 2,
+    fontWeight: "bold",
+  },
+  yourTurnIndicator: {
+    color: "#4ade80",
+    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 8, // isTablet ? 12 : 8
+  },
+  gameStatusContainer: {
+    alignItems: "center",
+    marginVertical: 16, // isTablet ? 20 : 16
+    paddingHorizontal: 24, // isTablet ? 24 : 20
+    paddingVertical: 12, // isTablet ? 16 : 12
+    backgroundColor: "#16213e",
+    borderRadius: 12, // isTablet ? 16 : 12
+    borderWidth: 1,
+    borderColor: "#0f3460",
+    maxWidth: "90%",
+    minHeight: 44, // minTouchTarget
+    justifyContent: "center",
+  },
+  turnIndicator: {
+    color: "#e2e8f0",
+    fontSize: 16, // isTablet ? 18 : isSmallScreen ? 14 : 16
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  myTurnIndicator: {
+    color: "#4ade80",
   },
   checkText: {
-    color: '#ff6b6b',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginTop: 5,
+    color: "#ef4444",
+    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontWeight: "bold",
+    textAlign: "center",
   },
   checkmateText: {
-    color: '#ff4757',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginTop: 5,
+    color: "#ef4444",
+    fontSize: 24, // isTablet ? 24 : isSmallScreen ? 18 : 20
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 12, // isTablet ? 12 : 8
   },
   stalemateText: {
-    color: '#ffa502',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginTop: 5,
+    color: "#f59e0b",
+    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 12, // isTablet ? 12 : 8
   },
-  waitingText: {
-    color: '#ffd43b',
-    fontSize: 12,
-    marginTop: 5,
+  gameResultText: {
+    color: "#94a3b8",
+    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    textAlign: "center",
   },
-  yourTurnText: {
-    color: '#2ed573',
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginTop: 5,
+  boardContainer: {
+    alignItems: "center",
+    marginVertical: 16, // isTablet ? 20 : 16
+    width: "100%",
   },
   board: {
-    borderWidth: 2,
-    borderColor: '#40444B',
-    borderRadius: 4,
+    borderWidth: 3, // isTablet ? 4 : 3
+    borderColor: "#8b5a2b",
+    borderRadius: 8, // isTablet ? 12 : 8
+    backgroundColor: "#8b5a2b",
+    padding: 6, // isTablet ? 6 : 4
+    width: 380 + 8, // boardSize + (isTablet ? 12 : 8)
+    height: 380 + 8, // boardSize + (isTablet ? 12 : 8)
   },
   row: {
-    flexDirection: 'row',
+    flexDirection: "row",
   },
   square: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
+    minHeight: Math.max(44, 44 * 0.8), // Math.max(squareSize, minTouchTarget * 0.8)
+    minWidth: Math.max(44, 44 * 0.8), // Math.max(squareSize, minTouchTarget * 0.8)
   },
-  selectedSquare: {
-    // backgroundColor: '#7dd3fc !important',
-    // Border now handled inline
+  coordinateLabel: {
+    position: "absolute",
+    fontSize: 12, // isTablet ? 12 : isSmallScreen ? 8 : 10
+    fontWeight: "bold",
   },
-  possibleMoveSquare: {
-    // backgroundColor: '#86efac',
-    // Border now handled inline
+  rankLabel: {
+    top: 3, // isTablet ? 3 : 2
+    left: 3, // isTablet ? 3 : 2
   },
-  lastMoveSquare: {
-    // backgroundColor: '#fbbf24',
-    // Border now handled inline
+  fileLabel: {
+    bottom: 3, // isTablet ? 3 : 2
+    right: 3, // isTablet ? 3 : 2
   },
   piece: {
-    color: '#000',
-    fontWeight: 'bold',
-    textShadowColor: '#fff',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 1,
+    fontWeight: "bold",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   possibleMoveDot: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#22c55e',
-    opacity: 0.7,
+    position: "absolute",
+    width: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
+    height: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
+    borderRadius: 8, // isTablet ? 8 : isSmallScreen ? 5 : 6
+    backgroundColor: "#4ade80",
+    opacity: 0.8,
   },
-  moveHistoryContainer: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    width: 200,
-    height: 300,
-    backgroundColor: '#2C2F33',
-    borderRadius: 8,
+  captureIndicator: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
+    borderTopWidth: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
+    borderLeftColor: "transparent",
+    borderTopColor: "#ef4444",
+  },
+  controlsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+    maxWidth: 500, // isTablet ? 500 : 400
+    marginTop: 16, // isTablet ? 20 : 16
+    paddingHorizontal: 8, // isTablet ? 8 : 4
+  },
+  historyButton: {
+    backgroundColor: "#16213e",
+    paddingHorizontal: 20, // isTablet ? 20 : 16
+    paddingVertical: 12, // isTablet ? 12 : 8
+    borderRadius: 10, // isTablet ? 10 : 8
     borderWidth: 1,
-    borderColor: '#40444B',
+    borderColor: "#0f3460",
+    minHeight: 44, // minTouchTarget
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  historyButtonText: {
+    color: "#e2e8f0",
+    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontWeight: "bold",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.8)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16, // containerPadding
+  },
+  moveHistoryModal: {
+    backgroundColor: "#16213e",
+    borderRadius: 12, // isTablet ? 16 : 12
+    width: "95%",
+    maxWidth: 500, // isTablet ? 500 : 400
+    maxHeight: "80%",
+    borderWidth: 2,
+    borderColor: "#0f3460",
   },
   moveHistoryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20, // isTablet ? 20 : 16
     borderBottomWidth: 1,
-    borderBottomColor: '#40444B',
+    borderBottomColor: "#0f3460",
+    minHeight: 64, // minTouchTarget + 20
   },
   moveHistoryTitle: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
+    color: "#e2e8f0",
+    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontWeight: "bold",
+    marginBottom: 24, // isTablet ? 24 : 20
+    textAlign: "center",
   },
   closeButton: {
-    color: '#b0b3b8',
-    fontSize: 16,
-    fontWeight: 'bold',
+    padding: 12, // isTablet ? 12 : 8
+    minWidth: 44, // minTouchTarget
+    minHeight: 44, // minTouchTarget
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  closeButtonText: {
+    color: "#94a3b8",
+    fontSize: 20, // isTablet ? 20 : 18
+    fontWeight: "bold",
   },
   moveHistoryScroll: {
     flex: 1,
-    padding: 10,
+    padding: 20, // isTablet ? 20 : 16
   },
   moveRow: {
-    flexDirection: 'row',
-    marginBottom: 5,
+    flexDirection: "row",
+    marginBottom: 12, // isTablet ? 12 : 8
+    paddingVertical: 6, // isTablet ? 6 : 4
+    alignItems: "center",
   },
   moveNumber: {
-    color: '#b0b3b8',
-    fontSize: 12,
-    width: 25,
+    color: "#94a3b8",
+    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    width: 40, // isTablet ? 40 : 30
+    fontWeight: "bold",
   },
   moveText: {
-    color: '#fff',
-    fontSize: 12,
-    width: 35,
-    marginHorizontal: 5,
+    color: "#e2e8f0",
+    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    width: 80, // isTablet ? 80 : 60
+    marginHorizontal: 12, // isTablet ? 12 : 8
   },
-});
+  promotionModal: {
+    backgroundColor: "#16213e",
+    borderRadius: 12, // isTablet ? 16 : 12
+    padding: 24, // isTablet ? 32 : 24
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#0f3460",
+    maxWidth: "90%",
+  },
+  promotionTitle: {
+    color: "#e2e8f0",
+    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontWeight: "bold",
+    marginBottom: 24, // isTablet ? 24 : 20
+    textAlign: "center",
+  },
+  promotionOptions: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginBottom: 24, // isTablet ? 24 : 20
+    flexWrap: "wrap",
+  },
+  promotionOption: {
+    margin: 12, // isTablet ? 12 : 8
+    padding: 16, // isTablet ? 20 : 16
+    backgroundColor: "#0f3460",
+    borderRadius: 10, // isTablet ? 12 : 8
+    borderWidth: 1,
+    borderColor: "#334155",
+    minWidth: 54, // minTouchTarget + 10
+    minHeight: 54, // minTouchTarget + 10
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  promotionPiece: {
+    fontSize: 32, // isTablet ? 40 : isSmallScreen ? 28 : 32
+    textAlign: "center",
+  },
+  cancelButton: {
+    paddingHorizontal: 24, // isTablet ? 24 : 20
+    paddingVertical: 14, // isTablet ? 14 : 10
+    backgroundColor: "#374151",
+    borderRadius: 10, // isTablet ? 10 : 8
+    minHeight: 44, // minTouchTarget
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cancelButtonText: {
+    color: "#94a3b8",
+    fontSize: 18, // isTablet ? 18 : 16
+  },
+})
