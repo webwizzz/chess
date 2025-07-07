@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Socket } from "socket.io-client";
 import { getSocketInstance } from "../utils/socketManager";
 import GameControls from "./GameControls";
@@ -30,6 +30,11 @@ interface GameState {
     enPassantSquare: string;
     halfmoveClock: number;
     fullmoveNumber: number;
+    whiteTime?: number;
+    blackTime?: number;
+    turnStartTimestamp?: number;
+    moveHistory?: { from: string; to: string; [key: string]: any }[];
+    repetitionMap?: any;
   };
   timeControl: {
     type: string;
@@ -43,20 +48,44 @@ interface GameState {
       white: boolean;
       black: boolean;
     };
+    timeSpent?: { white: any; black: any };
   };
   status: string;
   result: string;
-  moves: string[];
+  resultReason?: string | null;
+  winner?: string | null;
+  moves: any[];
   moveCount: number;
-  lastMove: string | null;
+  lastMove: any;
   gameState: {
-    check: boolean;
-    checkmate: boolean;
-    stalemate: boolean;
+    valid?: boolean;
+    move?: any;
+    state?: any;
+    result?: string;
+    check?: boolean;
+    checkmate?: boolean;
+    stalemate?: boolean;
+    insufficientMaterial?: boolean;
+    threefoldRepetition?: boolean;
+    fiftyMoveRule?: boolean;
+    canCastleKingside?: { white?: boolean; black?: boolean };
+    canCastleQueenside?: { white?: boolean; black?: boolean };
+    promotionAvailable?: boolean;
+    lastMove?: any;
+    winner?: string | null;
+    drawReason?: string | null;
   };
   userColor: {
     [key: string]: "white" | "black";
   };
+  positionHistory?: string[];
+  createdAt?: number;
+  lastActivity?: number;
+  startedAt?: number;
+  endedAt?: number | null;
+  rules?: any;
+  metadata?: any;
+  timers?: any;
 }
 
 interface Move {
@@ -88,7 +117,26 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
   const [boardFlipped, setBoardFlipped] = useState(false);
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
   const [showMoveHistory, setShowMoveHistory] = useState(false);
+  const [promotionModal, setPromotionModal] = useState<{ visible: boolean, from: string, to: string, options: string[] } | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Timer sync state
+  function safeTimerValue(val: any): number {
+    const n = Number(val);
+    return isNaN(n) || n === undefined || n === null ? 0 : n;
+  }
+  const [localTimers, setLocalTimers] = useState<{white: number, black: number}>(
+    {
+      white: safeTimerValue(initialGameState.timeControl.timers.white),
+      black: safeTimerValue(initialGameState.timeControl.timers.black)
+    }
+  );
+  const lastBackendSync = useRef<{white: number, black: number, ts: number}>(
+    {
+      white: safeTimerValue(initialGameState.timeControl.timers.white),
+      black: safeTimerValue(initialGameState.timeControl.timers.black),
+      ts: Date.now()
+    }
+  );
 
   const screenWidth = Dimensions.get('window').width;
   const boardSize = screenWidth - 40;
@@ -153,51 +201,38 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     };
   }, [socket]);
 
-  // Timer effect: decrement timer for active player every second
-useEffect(() => {
-  if (gameState.status !== "active") {
+  // Timer effect: smooth local countdown, resync on backend update
+  useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
-    return;
-  }
-  if (timerRef.current) clearInterval(timerRef.current);
-  if (!isMyTurn && gameState.board.activeColor !== playerColor) {
-    // Not my turn, but still decrement opponent's timer
+    if (gameState.status !== "active") return;
+    // Start local timer
     timerRef.current = setInterval(() => {
-      setGameState(prev => {
-        const color = prev.board.activeColor;
-        return {
-          ...prev,
-          timeControl: {
-            ...prev.timeControl,
-            timers: {
-              ...prev.timeControl.timers,
-              [color]: Math.max(0, prev.timeControl.timers[color] - 1000)
-            }
-          }
-        };
+      setLocalTimers(prev => {
+        const now = Date.now();
+        const elapsed = now - lastBackendSync.current.ts;
+        const white = Math.max(0, safeTimerValue(lastBackendSync.current.white) - elapsed);
+        const black = Math.max(0, safeTimerValue(lastBackendSync.current.black) - elapsed);
+        return {white, black};
       });
     }, 1000);
-  } else if (isMyTurn) {
-    timerRef.current = setInterval(() => {
-      setGameState(prev => {
-        const color = prev.board.activeColor;
-        return {
-          ...prev,
-          timeControl: {
-            ...prev.timeControl,
-            timers: {
-              ...prev.timeControl.timers,
-              [color]: Math.max(0, prev.timeControl.timers[color] - 1000)
-            }
-          }
-        };
-      });
-    }, 1000);
-  }
-  return () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-  };
-}, [isMyTurn, gameState.status, gameState.board.activeColor]);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [gameState.status, gameState.board.activeColor]);
+
+  // On every backend timer/game update, resync local timer base
+  useEffect(() => {
+    if (!gameState.timeControl || !gameState.timeControl.timers) return;
+    lastBackendSync.current = {
+      white: safeTimerValue(gameState.timeControl.timers.white),
+      black: safeTimerValue(gameState.timeControl.timers.black),
+      ts: Date.now(),
+    };
+    setLocalTimers({
+      white: safeTimerValue(gameState.timeControl.timers.white),
+      black: safeTimerValue(gameState.timeControl.timers.black),
+    });
+  }, [gameState.timeControl.timers.white, gameState.timeControl.timers.black]);
 
   // Handles the 'game:move' event from the server
   const handleGameMove = (data: any) => {
@@ -206,12 +241,23 @@ useEffect(() => {
     if (data && data.gameState) {
       setGameState(prevState => ({
         ...prevState,
-        ...data.gameState
+        ...data.gameState,
+        board: {
+          ...prevState.board,
+          ...data.gameState.board,
+        },
+        moves: data.gameState.moves || [],
+        lastMove: data.gameState.lastMove,
+        moveCount: data.gameState.moveCount,
       }));
+      console.log("Updated game state:", data.gameState);
       setMoveHistory(data.gameState.moves || []);
       setSelectedSquare(null);
       setPossibleMoves([]);
-      setIsMyTurn(data.gameState.board.activeColor === playerColor);
+      // Use the updated activeColor from the new gameState
+      const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor;
+      const activeColor = data.gameState.board.activeColor;
+      setIsMyTurn(activeColor === userColor);
     }
   };
 
@@ -248,13 +294,14 @@ useEffect(() => {
   const handleTimerUpdate = (data: any) => {
     // data: { timers: ..., black: ... }
     console.log("Timer update:", data);
+    // Always coerce to numbers and fallback to previous if missing
     setGameState(prevState => ({
       ...prevState,
       timeControl: {
         ...prevState.timeControl,
-        timers: data.timers || {
-          white: data.timers || prevState.timeControl.timers.white,
-          black: data.black || prevState.timeControl.timers.black
+        timers: {
+          white: safeTimerValue(data?.timers?.white ?? data?.white ?? prevState.timeControl.timers.white),
+          black: safeTimerValue(data?.timers?.black ?? data?.black ?? prevState.timeControl.timers.black)
         }
       }
     }));
@@ -325,33 +372,14 @@ useEffect(() => {
       console.log('[DEBUG] Not emitting move: socket or isMyTurn false');
       return;
     }
-    // Convert move object to string format (e.g., "e2e4")
-    const moveStr = move.promotion
-      ? `${move.from}${move.to}${move.promotion}`
-      : `${move.from}${move.to}`;
-    // Optimistically update the board for immediate feedback
-    setGameState(prevState => {
-      let newPosition = updatePositionString(prevState.board.position, move.from, move.to);
-      let newActiveColor: 'white' | 'black' = playerColor === 'white' ? 'black' : 'white';
-      let newState: GameState = {
-        ...prevState,
-        lastMove: moveStr,
-        board: {
-          ...prevState.board,
-          position: newPosition,
-          activeColor: newActiveColor,
-        },
-      };
-      return newState;
-    });
     setIsMyTurn(false);
     setSelectedSquare(null);
     setPossibleMoves([]);
     socket.emit("game:makeMove", {
-      move: moveStr,
-      timestamp: Math.floor(Date.now() / 1000)
+      move: { from: move.from, to: move.to, promotion: move.promotion },
+      timestamp: Date.now()
     });
-    console.log('[DEBUG] Move emitted:', moveStr);
+    console.log('[DEBUG] Move emitted:', { from: move.from, to: move.to, promotion: move.promotion });
   };
 
   const handleSquarePress = (square: string) => {
@@ -363,6 +391,37 @@ useEffect(() => {
     }
 
     if (selectedSquare && possibleMoves.includes(square)) {
+      // Check if this move is a promotion
+      // Find all possible moves for selectedSquare to this square
+      const allMoves = (gameState && gameState.moves) ? gameState.moves : [];
+      // But better: use the last possibleMoves event, which is more accurate
+      // So, let's keep the last possibleMoves data in a ref
+      // But for now, let's check for promotion in the backend's possible moves
+      let promotionOptions: string[] = [];
+      if (Array.isArray(gameState && gameState.board && gameState.board.moveHistory)) {
+        // Not reliable for current move, so use below
+      }
+      // Use possibleMoves from last request
+      if (Array.isArray(possibleMoves) && possibleMoves.length > 0) {
+        // But we need the full move objects, not just squares
+        // So, let's use the last possibleMoves event if we can
+      }
+      // Instead, let's use the last possibleMoves event, but we need to store the full move objects
+      // Let's add a ref to store the last full move objects
+      // We'll add this at the top:
+      // const lastPossibleMoveObjects = useRef<any[]>([]);
+      // And update it in handlePossibleMoves
+      // For now, let's just check for promotion using the backend's move list
+      let promotionMoves = [];
+      if (Array.isArray(gameState && gameState.moves)) {
+        promotionMoves = gameState.moves.filter((m: any) => m.from === selectedSquare && m.to === square && m.promotion);
+      }
+      if (promotionMoves.length > 0) {
+        // Multiple promotion options, show modal
+        const options = promotionMoves.map((m: any) => m.promotion).filter((v: any, i: number, arr: any[]) => arr.indexOf(v) === i);
+        setPromotionModal({ visible: true, from: selectedSquare, to: square, options });
+        return;
+      }
       // Only allow moves that are in possibleMoves
       makeMove({ from: selectedSquare, to: square });
       setSelectedSquare(null);
@@ -381,26 +440,40 @@ useEffect(() => {
     }
   };
 
+  // Handle promotion selection
+  const handlePromotionSelect = (promotion: string) => {
+    if (promotionModal) {
+      makeMove({ from: promotionModal.from, to: promotionModal.to, promotion });
+      setPromotionModal(null);
+      setSelectedSquare(null);
+      setPossibleMoves([]);
+    }
+  };
+
+  // Correct FEN parsing for piece lookup
   const getPieceAt = (square: string): string | null => {
     const fileIndex = FILES.indexOf(square[0]);
-    const rankIndex = parseInt(square[1]) - 1;
-    const boardIndex = (7 - rankIndex) * 8 + fileIndex;
-    console.log("Board Positions", gameState.board.position);
-    
-    const position = gameState.board.position.replace(/\//g, '');
-    let currentIndex = 0;
-    
-    for (let char of position) {
-      if (char >= '1' && char <= '8') {
-        currentIndex += parseInt(char);
+    const rankIndex = RANKS.indexOf(square[1]);
+    if (fileIndex === -1 || rankIndex === -1) return null;
+    const fen = gameState.board.fen || gameState.board.position;
+    if (!fen) return null;
+    // Only use the piece placement part (before first space)
+    const piecePlacement = fen.split(' ')[0];
+    const rows = piecePlacement.split('/');
+    if (rows.length !== 8) return null;
+    const row = rows[rankIndex];
+    let col = 0;
+    for (let i = 0; i < row.length; i++) {
+      const c = row[i];
+      if (c >= '1' && c <= '8') {
+        col += parseInt(c);
       } else {
-        if (currentIndex === boardIndex) {
-          return char;
+        if (col === fileIndex) {
+          return c;
         }
-        currentIndex++;
+        col++;
       }
     }
-    
     return null;
   };
 
@@ -413,6 +486,7 @@ useEffect(() => {
   };
 
   const formatTime = (milliseconds: number): string => {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return '0:00';
     const totalSeconds = Math.floor(milliseconds / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
@@ -424,7 +498,17 @@ useEffect(() => {
     const isLight = (FILES.indexOf(file) + parseInt(rank)) % 2 === 0;
     const isSelected = selectedSquare === square;
     const isPossibleMove = possibleMoves.includes(square);
-    const isLastMove = gameState.lastMove && (gameState.lastMove.includes(square));
+    // Use the last move from moveHistory if available
+    let lastMoveObj = null;
+    if (gameState.board && Array.isArray(gameState.board.moveHistory) && gameState.board.moveHistory.length > 0) {
+      lastMoveObj = gameState.board.moveHistory[gameState.board.moveHistory.length - 1];
+    } else if (gameState.lastMove && typeof gameState.lastMove === 'object' && gameState.lastMove.from && gameState.lastMove.to) {
+      lastMoveObj = gameState.lastMove;
+    }
+    let isLastMove = false;
+    if (lastMoveObj && lastMoveObj.from && lastMoveObj.to) {
+      isLastMove = (lastMoveObj.from === square || lastMoveObj.to === square);
+    }
     const piece = getPieceAt(square);
 
     return (
@@ -458,10 +542,40 @@ useEffect(() => {
     );
   };
 
+
+  // Render game info (check, checkmate, stalemate, etc.)
+  const renderGameInfo = () => {
+    const gs = gameState.gameState || {};
+    if (gs.checkmate) {
+      return <Text style={styles.checkmateText}>Checkmate! {gameState.winner ? (gameState.winner === playerColor ? 'You win!' : 'You lose!') : ''}</Text>;
+    }
+    if (gs.stalemate) {
+      return <Text style={styles.stalemateText}>Stalemate</Text>;
+    }
+    if (gs.check) {
+      return <Text style={styles.checkText}>Check</Text>;
+    }
+    if (gs.insufficientMaterial) {
+      return <Text style={styles.stalemateText}>Draw: Insufficient Material</Text>;
+    }
+    if (gs.threefoldRepetition) {
+      return <Text style={styles.stalemateText}>Draw: Threefold Repetition</Text>;
+    }
+    if (gs.fiftyMoveRule) {
+      return <Text style={styles.stalemateText}>Draw: 50-move Rule</Text>;
+    }
+    if (gs.promotionAvailable) {
+      return <Text style={styles.checkText}>Promotion Available</Text>;
+    }
+    if (gameState.result && gameState.result !== 'ongoing') {
+      return <Text style={styles.stalemateText}>Game Over: {gameState.result}</Text>;
+    }
+    return null;
+  };
+
   const renderBoard = () => {
     const files = boardFlipped ? [...FILES].reverse() : FILES;
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS;
-    
     return (
       <View style={styles.board}>
         {ranks.map((rank) => (
@@ -483,7 +597,8 @@ useEffect(() => {
         </View>
       );
     }
-    const timer = gameState.timeControl.timers[color];
+    // Use localTimers for smooth UI, fallback to backend if needed
+    const timer = safeTimerValue(localTimers[color] !== undefined ? localTimers[color] : gameState.timeControl.timers[color]);
     const isActive = gameState.board.activeColor === color;
     const isMe = playerColor === color;
 
@@ -558,7 +673,7 @@ useEffect(() => {
   return (
     <View style={styles.container}>
       {renderPlayerInfo(topPlayer, true)}
-      {/* {renderGameInfo()} */}
+      {renderGameInfo()}
       {renderBoard()}
       {renderPlayerInfo(bottomPlayer, false)}
       <GameControls
@@ -570,6 +685,33 @@ useEffect(() => {
         onFlipBoard={handleFlipBoard}
       />
       {renderMoveHistory()}
+      {/* Promotion Modal */}
+      <Modal
+        visible={!!promotionModal && promotionModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPromotionModal(null)}
+      >
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <View style={{ backgroundColor: '#23272A', padding: 24, borderRadius: 12, alignItems: 'center' }}>
+            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12 }}>Choose promotion piece</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
+              {promotionModal && promotionModal.options.map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  style={{ margin: 8, padding: 12, backgroundColor: '#36393F', borderRadius: 8 }}
+                  onPress={() => handlePromotionSelect(p)}
+                >
+                  <Text style={{ color: '#fff', fontSize: 24 }}>{PIECE_SYMBOLS[p.toUpperCase()] || p.toUpperCase()}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity onPress={() => setPromotionModal(null)} style={{ marginTop: 16 }}>
+              <Text style={{ color: '#b0b3b8' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
