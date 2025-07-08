@@ -83,6 +83,9 @@ interface GameState {
     lastMove?: any
     winner?: string | null
     drawReason?: string | null
+    gameEnded?: boolean
+    endReason?: string | null
+    endTimestamp?: number
   }
   userColor: {
     [key: string]: "white" | "black"
@@ -106,6 +109,7 @@ interface Move {
 interface ChessGameProps {
   initialGameState: GameState
   userId: string
+  onNavigateToMenu?: () => void // Callback to navigate back to menu
 }
 
 const PIECE_SYMBOLS = {
@@ -141,7 +145,7 @@ const PIECE_VALUES = {
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
 
-export default function ChessGame({ initialGameState, userId }: ChessGameProps) {
+export default function ChessGame({ initialGameState, userId, onNavigateToMenu }: ChessGameProps) {
   const [gameState, setGameState] = useState<GameState>(initialGameState)
   const [socket, setSocket] = useState<Socket | null>(null)
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
@@ -158,11 +162,17 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     options: string[]
   } | null>(null)
 
+  // Game ending state
+  const [showGameEndModal, setShowGameEndModal] = useState(false)
+  const [gameEndMessage, setGameEndMessage] = useState("")
+  const [isWinner, setIsWinner] = useState<boolean | null>(null)
+
   // Timer management
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const lastUpdateRef = useRef<number>(Date.now())
   const gameStartTimeRef = useRef<number | null>(null)
   const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Timer sync state - improved timer management
   function safeTimerValue(val: any): number {
@@ -208,6 +218,88 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
   const titleFontSize = isTablet ? 24 : isSmallScreen ? 18 : 20
   const smallFontSize = isTablet ? 14 : isSmallScreen ? 11 : 12
 
+  // Function to handle game ending
+  const handleGameEnd = (result: string, winner: string | null, endReason: string) => {
+    console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
+
+    // Stop all timers
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+    }
+
+    // Determine if current player won
+    let playerWon: boolean | null = null
+    let message = ""
+
+    if (result === "checkmate") {
+      // FIXED: Use the actual winner from the game result, not playerColor
+      if (winner === playerColor) {
+        playerWon = true
+        message = "🎉 VICTORY! 🎉\nCheckmate! You won the game!"
+      } else if (winner && winner !== playerColor) {
+        playerWon = false
+        message = "😔 DEFEAT 😔\nCheckmate! You lost the game."
+      } else {
+        // Fallback if winner is not properly set
+        playerWon = null
+        message = "🏁 GAME OVER 🏁\nCheckmate occurred"
+      }
+    } else if (result === "timeout") {
+      if (winner === playerColor) {
+        playerWon = true
+        message = "🎉 VICTORY! 🎉\nYour opponent ran out of time!"
+      } else if (winner && winner !== playerColor) {
+        playerWon = false
+        message = "😔 DEFEAT 😔\nYou ran out of time!"
+      } else {
+        playerWon = null
+        message = "🏁 GAME OVER 🏁\nTime expired"
+      }
+    } else if (result === "draw") {
+      playerWon = null
+      message = `⚖️ DRAW ⚖️\n${endReason || "Game ended in a draw"}`
+    } else {
+      playerWon = null
+      message = `🏁 GAME OVER 🏁\n${result}`
+    }
+
+    setIsWinner(playerWon)
+    setGameEndMessage(message)
+    setShowGameEndModal(true)
+
+    // Disconnect socket after a short delay
+    setTimeout(() => {
+      if (socket) {
+        console.log("[SOCKET] Disconnecting from game")
+        socket.disconnect()
+        setSocket(null)
+      }
+    }, 1000)
+
+    // Auto-navigate to menu after showing the message
+    navigationTimeoutRef.current = setTimeout(() => {
+      setShowGameEndModal(false)
+      if (onNavigateToMenu) {
+        onNavigateToMenu()
+      }
+    }, 5000) // Show message for 5 seconds
+  }
+
+  // Function to manually navigate to menu
+  const navigateToMenu = () => {
+    if (navigationTimeoutRef.current) {
+      clearTimeout(navigationTimeoutRef.current)
+    }
+    setShowGameEndModal(false)
+    if (socket) {
+      socket.disconnect()
+      setSocket(null)
+    }
+    if (onNavigateToMenu) {
+      onNavigateToMenu()
+    }
+  }
+
   useEffect(() => {
     // Set up game socket connection
     const gameSocket = getSocketInstance()
@@ -243,6 +335,9 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
       if (timerRef.current) {
         clearInterval(timerRef.current)
       }
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current)
+      }
     }
   }, [])
 
@@ -275,18 +370,18 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     socket.on("game:possibleMoves", handlePossibleMoves)
     socket.on("game:gameState", handleGameStateUpdate)
     socket.on("game:timer", handleTimerUpdate)
-    socket.on("game:end", handleGameEnd)
+    socket.on("game:end", handleGameEndEvent)
     socket.on("game:error", handleGameError)
 
     return () => {
       socket.off("game:move", handleGameMove)
       socket.off("game:possibleMoves", handlePossibleMoves)
       socket.off("game:gameState", handleGameStateUpdate)
-      socket.off("game:timer", handleGameTimerUpdate)
-      socket.off("game:end", handleGameEnd)
+      socket.off("game:timer", handleTimerUpdate)
+      socket.off("game:end", handleGameEndEvent)
       socket.off("game:error", handleGameError)
     }
-  }, [socket])
+  }, [socket, playerColor])
 
   // Improved timer effect with proper turn-based countdown
   useEffect(() => {
@@ -294,7 +389,7 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
       clearInterval(timerRef.current)
     }
 
-    if (gameState.status !== "active") {
+    if (gameState.status !== "active" || gameState.gameState?.gameEnded) {
       return
     }
 
@@ -339,32 +434,27 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
         if (!serverSync.isFirstMove) {
           if (serverSync.activeColor === "white") {
             newWhite = Math.max(0, serverSync.white - elapsedSinceSync)
-            // Keep black time unchanged from server sync
             newBlack = serverSync.black
           } else if (serverSync.activeColor === "black") {
             newBlack = Math.max(0, serverSync.black - elapsedSinceSync)
-            // Keep white time unchanged from server sync
             newWhite = serverSync.white
           }
         } else {
-          // For the first move, don't countdown - just keep the initial values
           newWhite = serverSync.white
           newBlack = serverSync.black
-          console.log("[TIMER] First move - not counting down, keeping initial values")
         }
 
-        // Only log significant changes to avoid spam
-        if (Math.abs(prev.white - newWhite) > 1000 || Math.abs(prev.black - newBlack) > 1000) {
-          console.log(
-            "[TIMER] Significant change - Active:",
-            serverSync.activeColor,
-            "White:",
-            Math.floor(newWhite / 1000),
-            "Black:",
-            Math.floor(newBlack / 1000),
-            "First move:",
-            serverSync.isFirstMove,
-          )
+        // Check for timeout and end game automatically
+        if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("WHITE TIMEOUT DETECTED - Ending game")
+          handleGameEnd("timeout", "black", "White ran out of time")
+          return { white: 0, black: newBlack }
+        }
+
+        if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("BLACK TIMEOUT DETECTED - Ending game")
+          handleGameEnd("timeout", "white", "Black ran out of time")
+          return { white: newWhite, black: 0 }
         }
 
         return { white: newWhite, black: newBlack }
@@ -384,6 +474,7 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
     gameState.board.turnStartTimestamp,
     gameState.moves?.length, // Add move count as dependency
     gameState.board?.moveHistory?.length, // Add move history length as dependency
+    gameState.gameState?.gameEnded, // Add this dependency
   ])
 
   const handleGameMove = (data: any) => {
@@ -443,6 +534,39 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
       }
 
       console.log("[MOVE] Updated server sync - Active color:", data.gameState.board.activeColor)
+
+      // Check if the game has ended due to checkmate or other conditions
+      if (
+        data.gameState.gameState?.gameEnded ||
+        data.gameState.gameState?.checkmate ||
+        data.gameState.status === "ended" ||
+        data.gameState.shouldNavigateToMenu
+      ) {
+        console.log("[MOVE] Game ended detected:", data.gameState.gameState)
+
+        const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+
+        // FIXED: Get the actual winner color from the game state
+        let winner = data.gameState.gameState?.winner || data.gameState.winner
+
+        // If winner is still a color string, use it directly
+        if (winner === "white" || winner === "black") {
+          // Winner is already the color, use it as is
+        } else if (data.gameState.gameState?.winnerColor) {
+          // Use winnerColor if available
+          winner = data.gameState.gameState.winnerColor
+        } else if (result === "checkmate") {
+          // Fallback: determine winner from active color (the player who got checkmated loses)
+          const checkmatedPlayer = data.gameState.board.activeColor
+          winner = checkmatedPlayer === "white" ? "black" : "white"
+        }
+
+        const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
+
+        console.log("[MOVE] Calling handleGameEnd with winner:", winner)
+        handleGameEnd(result, winner, endReason)
+        return
+      }
 
       setGameState((prevState) => ({
         ...prevState,
@@ -514,6 +638,28 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
   const handleGameStateUpdate = (data: any) => {
     console.log("Game state update:", data)
     if (data && data.gameState) {
+      // Check for game ending
+      if (
+        data.gameState.gameState?.gameEnded ||
+        data.gameState.status === "ended" ||
+        data.gameState.shouldNavigateToMenu
+      ) {
+        const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+
+        // FIXED: Get the actual winner color
+        let winner = data.gameState.gameState?.winner || data.gameState.winner
+        if (winner === "white" || winner === "black") {
+          // Winner is already the color
+        } else if (data.gameState.gameState?.winnerColor) {
+          winner = data.gameState.gameState.winnerColor
+        }
+
+        const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
+
+        handleGameEnd(result, winner, endReason)
+        return
+      }
+
       // Update server sync reference
       lastServerSync.current = {
         white: safeTimerValue(data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime),
@@ -542,6 +688,14 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
 
   const handleGameTimerUpdate = (data: any) => {
     console.log("Timer update:", data)
+
+    // Check for game ending in timer update
+    if (data.gameEnded || data.shouldNavigateToMenu) {
+      const result = data.endReason || "timeout"
+      const winner = data.winner
+      handleGameEnd(result, winner, result)
+      return
+    }
 
     // FIXED: Handle different timer update formats from server
     let whiteTime: number
@@ -610,19 +764,22 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
   }
 
   // Handles the 'game:end' event from the server
-  const handleGameEnd = (data: any) => {
-    console.log("Game ended:", data)
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
+  const handleGameEndEvent = (data: any) => {
+    console.log("Game end event received:", data)
+
+    const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
+
+    // FIXED: Get the actual winner color
+    let winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
+    if (winner === "white" || winner === "black") {
+      // Winner is already the color
+    } else if (data.gameState?.gameState?.winnerColor) {
+      winner = data.gameState.gameState.winnerColor
     }
-    if (data && data.gameState) {
-      setGameState((prevState) => ({
-        ...prevState,
-        ...data.gameState,
-        status: "ended",
-      }))
-      Alert.alert("Game Over", `Result: ${data.gameState.result || "Game ended"}`)
-    }
+
+    const endReason = data.gameState?.gameState?.endReason || data.gameState?.endReason || data.endReason || result
+
+    handleGameEnd(result, winner, endReason)
   }
 
   // Handles the 'game:error' event from the server
@@ -884,60 +1041,11 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
   const renderGameInfo = () => {
     const gs = gameState.gameState || {}
 
-    if (gs.checkmate) {
+    // Check if game has ended
+    if (gameState.status === "ended" || gs.gameEnded) {
       return (
         <View style={styles.gameStatusContainer}>
-          <Text style={styles.checkmateText}>♔ CHECKMATE! ♔</Text>
-          <Text style={styles.gameResultText}>
-            {gameState.winner ? (gameState.winner === playerColor ? "🎉 You Win!" : "😔 You Lose") : "Game Over"}
-          </Text>
-        </View>
-      )
-    }
-    if (gs.stalemate) {
-      return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.stalemateText}>⚖️ STALEMATE ⚖️</Text>
-          <Text style={styles.gameResultText}>Draw</Text>
-        </View>
-      )
-    }
-    if (gs.check) {
-      return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.checkText}>⚠️ CHECK! ⚠️</Text>
-        </View>
-      )
-    }
-    if (gs.insufficientMaterial) {
-      return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.stalemateText}>⚖️ DRAW ⚖️</Text>
-          <Text style={styles.gameResultText}>Insufficient Material</Text>
-        </View>
-      )
-    }
-    if (gs.threefoldRepetition) {
-      return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.stalemateText}>⚖️ DRAW ⚖️</Text>
-          <Text style={styles.gameResultText}>Threefold Repetition</Text>
-        </View>
-      )
-    }
-    if (gs.fiftyMoveRule) {
-      return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.stalemateText}>⚖️ DRAW ⚖️</Text>
-          <Text style={styles.gameResultText}>50-Move Rule</Text>
-        </View>
-      )
-    }
-    if (gameState.result && gameState.result !== "ongoing") {
-      return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.stalemateText}>🏁 GAME OVER 🏁</Text>
-          <Text style={styles.gameResultText}>{gameState.result}</Text>
+          <Text style={styles.gameOverText}>🏁 Game Ended 🏁</Text>
         </View>
       )
     }
@@ -1100,6 +1208,33 @@ export default function ChessGame({ initialGameState, userId }: ChessGameProps) 
       {/* Move History Modal */}
       {renderMoveHistory()}
 
+      {/* Game End Modal */}
+      <Modal visible={showGameEndModal} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.gameEndModal,
+              isWinner === true && styles.victoryModal,
+              isWinner === false && styles.defeatModal,
+            ]}
+          >
+            <Text
+              style={[
+                styles.gameEndTitle,
+                isWinner === true && styles.victoryTitle,
+                isWinner === false && styles.defeatTitle,
+              ]}
+            >
+              {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
+            </Text>
+            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
+            <TouchableOpacity style={styles.menuButton} onPress={navigateToMenu}>
+              <Text style={styles.menuButtonText}>Return to Menu</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Promotion Modal */}
       <Modal
         visible={!!promotionModal && promotionModal.visible}
@@ -1140,19 +1275,19 @@ const styles = StyleSheet.create({
     backgroundColor: "#1a1a2e",
     justifyContent: "center",
     alignItems: "center",
-    padding: 16, // containerPadding
-    minHeight: 300, // screenHeight
+    padding: 16,
+    minHeight: 300,
   },
   playerInfoContainer: {
     width: "100%",
-    maxWidth: 500, // isTablet ? 500 : 400
+    maxWidth: 500,
     backgroundColor: "#16213e",
-    borderRadius: 12, // isTablet ? 16 : 12
-    padding: 16, // isTablet ? 20 : isSmallScreen ? 12 : 16
-    marginVertical: 8, // isTablet ? 12 : 8
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 8,
     borderWidth: 2,
     borderColor: "#0f3460",
-    minHeight: 80, // isTablet ? 100 : isSmallScreen ? 70 : 80
+    minHeight: 80,
   },
   activePlayerContainer: {
     borderColor: "#4ade80",
@@ -1160,41 +1295,41 @@ const styles = StyleSheet.create({
     shadowColor: "#4ade80",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
-    shadowRadius: 8, // isTablet ? 12 : 8
-    elevation: 8, // isTablet ? 12 : 8
+    shadowRadius: 8,
+    elevation: 8,
   },
   playerHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8, // isTablet ? 12 : 8
-    minHeight: 44, // minTouchTarget
+    marginBottom: 8,
+    minHeight: 44,
   },
   playerDetails: {
     flex: 1,
-    marginRight: 12, // isTablet ? 16 : 12
+    marginRight: 12,
   },
   playerNameRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 6, // isTablet ? 6 : 4
+    marginBottom: 6,
     flexWrap: "wrap",
   },
   playerColorIndicator: {
-    fontSize: 20, // isTablet ? 24 : isSmallScreen ? 16 : 20
+    fontSize: 20,
     fontWeight: "bold",
-    marginRight: 12, // isTablet ? 12 : 8
-    paddingHorizontal: 10, // isTablet ? 10 : 8
-    paddingVertical: 4, // isTablet ? 4 : 2
-    borderRadius: 6, // isTablet ? 6 : 4
-    minWidth: 35.2, // minTouchTarget * 0.8
+    marginRight: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 35.2,
     textAlign: "center",
   },
   playerName: {
     color: "#e2e8f0",
-    fontSize: 18, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontSize: 18,
     fontWeight: "bold",
-    marginRight: 12, // isTablet ? 12 : 8
+    marginRight: 12,
     flexShrink: 1,
   },
   activePlayerName: {
@@ -1202,28 +1337,28 @@ const styles = StyleSheet.create({
   },
   youIndicator: {
     color: "#60a5fa",
-    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontSize: 14,
     fontStyle: "italic",
   },
   playerRating: {
     color: "#94a3b8",
-    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
-    marginBottom: 6, // isTablet ? 6 : 4
+    fontSize: 14,
+    marginBottom: 6,
   },
   materialAdvantage: {
     color: "#4ade80",
-    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontSize: 14,
     fontWeight: "bold",
   },
   timerContainer: {
     backgroundColor: "#0f172a",
-    paddingHorizontal: 16, // isTablet ? 16 : 12
-    paddingVertical: 12, // isTablet ? 12 : 8
-    borderRadius: 10, // isTablet ? 10 : 8
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "#334155",
-    minWidth: 120, // isTablet ? 120 : 100
-    minHeight: 44, // minTouchTarget
+    minWidth: 120,
+    minHeight: 44,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1233,7 +1368,7 @@ const styles = StyleSheet.create({
   },
   timerText: {
     color: "#e2e8f0",
-    fontSize: 16, // isTablet ? 18 : isSmallScreen ? 14 : 16
+    fontSize: 16,
     fontWeight: "bold",
     textAlign: "center",
   },
@@ -1243,92 +1378,73 @@ const styles = StyleSheet.create({
   capturedPieces: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 8, // isTablet ? 12 : 8
-    minHeight: 30, // isTablet ? 30 : 20
+    marginTop: 8,
+    minHeight: 30,
   },
   capturedPieceGroup: {
     flexDirection: "row",
     alignItems: "center",
-    marginRight: 12, // isTablet ? 16 : 12
-    marginBottom: 6, // isTablet ? 6 : 4
+    marginRight: 12,
+    marginBottom: 6,
   },
   capturedPiece: {
-    fontSize: 16, // isTablet ? 20 : isSmallScreen ? 14 : 16
+    fontSize: 16,
     color: "#94a3b8",
   },
   capturedCount: {
-    fontSize: 12, // isTablet ? 14 : isSmallScreen ? 10 : 12
+    fontSize: 12,
     color: "#60a5fa",
     marginLeft: 2,
     fontWeight: "bold",
   },
   yourTurnIndicator: {
     color: "#4ade80",
-    fontSize: 14, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontSize: 14,
     fontWeight: "bold",
     textAlign: "center",
-    marginTop: 8, // isTablet ? 12 : 8
+    marginTop: 8,
   },
   gameStatusContainer: {
     alignItems: "center",
-    marginVertical: 16, // isTablet ? 20 : 16
-    paddingHorizontal: 24, // isTablet ? 24 : 20
-    paddingVertical: 12, // isTablet ? 16 : 12
+    marginVertical: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
     backgroundColor: "#16213e",
-    borderRadius: 12, // isTablet ? 16 : 12
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#0f3460",
     maxWidth: "90%",
-    minHeight: 44, // minTouchTarget
+    minHeight: 44,
     justifyContent: "center",
   },
   turnIndicator: {
     color: "#e2e8f0",
-    fontSize: 16, // isTablet ? 18 : isSmallScreen ? 14 : 16
+    fontSize: 16,
     fontWeight: "bold",
     textAlign: "center",
   },
   myTurnIndicator: {
     color: "#4ade80",
   },
-  checkText: {
-    color: "#ef4444",
-    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  checkmateText: {
-    color: "#ef4444",
-    fontSize: 24, // isTablet ? 24 : isSmallScreen ? 18 : 20
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 12, // isTablet ? 12 : 8
-  },
-  stalemateText: {
-    color: "#f59e0b",
-    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 12, // isTablet ? 12 : 8
-  },
-  gameResultText: {
+  gameOverText: {
     color: "#94a3b8",
-    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontSize: 16,
+    fontWeight: "bold",
     textAlign: "center",
   },
   boardContainer: {
     alignItems: "center",
-    marginVertical: 16, // isTablet ? 20 : 16
+    marginVertical: 16,
     width: "100%",
   },
   board: {
-    borderWidth: 3, // isTablet ? 4 : 3
+    borderWidth: 3,
     borderColor: "#8b5a2b",
-    borderRadius: 8, // isTablet ? 12 : 8
+    borderRadius: 8,
     backgroundColor: "#8b5a2b",
-    padding: 6, // isTablet ? 6 : 4
-    width: 380 + 8, // boardSize + (isTablet ? 12 : 8)
-    height: 380 + 8, // boardSize + (isTablet ? 12 : 8)
+    padding: 6,
+    width: 388,
+    height: 388,
   },
   row: {
     flexDirection: "row",
@@ -1337,21 +1453,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     position: "relative",
-    minHeight: Math.max(44, 44 * 0.8), // Math.max(squareSize, minTouchTarget * 0.8)
-    minWidth: Math.max(44, 44 * 0.8), // Math.max(squareSize, minTouchTarget * 0.8)
+    minHeight: 35.2,
+    minWidth: 35.2,
   },
   coordinateLabel: {
     position: "absolute",
-    fontSize: 12, // isTablet ? 12 : isSmallScreen ? 8 : 10
+    fontSize: 12,
     fontWeight: "bold",
   },
   rankLabel: {
-    top: 3, // isTablet ? 3 : 2
-    left: 3, // isTablet ? 3 : 2
+    top: 3,
+    left: 3,
   },
   fileLabel: {
-    bottom: 3, // isTablet ? 3 : 2
-    right: 3, // isTablet ? 3 : 2
+    bottom: 3,
+    right: 3,
   },
   piece: {
     fontWeight: "bold",
@@ -1361,9 +1477,9 @@ const styles = StyleSheet.create({
   },
   possibleMoveDot: {
     position: "absolute",
-    width: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
-    height: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
-    borderRadius: 8, // isTablet ? 8 : isSmallScreen ? 5 : 6
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     backgroundColor: "#4ade80",
     opacity: 0.8,
   },
@@ -1373,8 +1489,8 @@ const styles = StyleSheet.create({
     right: 0,
     width: 0,
     height: 0,
-    borderLeftWidth: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
-    borderTopWidth: 16, // isTablet ? 16 : isSmallScreen ? 10 : 12
+    borderLeftWidth: 16,
+    borderTopWidth: 16,
     borderLeftColor: "transparent",
     borderTopColor: "#ef4444",
   },
@@ -1383,24 +1499,24 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     width: "100%",
-    maxWidth: 500, // isTablet ? 500 : 400
-    marginTop: 16, // isTablet ? 20 : 16
-    paddingHorizontal: 8, // isTablet ? 8 : 4
+    maxWidth: 500,
+    marginTop: 16,
+    paddingHorizontal: 8,
   },
   historyButton: {
     backgroundColor: "#16213e",
-    paddingHorizontal: 20, // isTablet ? 20 : 16
-    paddingVertical: 12, // isTablet ? 12 : 8
-    borderRadius: 10, // isTablet ? 10 : 8
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "#0f3460",
-    minHeight: 44, // minTouchTarget
+    minHeight: 44,
     justifyContent: "center",
     alignItems: "center",
   },
   historyButtonText: {
     color: "#e2e8f0",
-    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
+    fontSize: 16,
     fontWeight: "bold",
   },
   modalOverlay: {
@@ -1408,13 +1524,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.8)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 16, // containerPadding
+    padding: 16,
   },
   moveHistoryModal: {
     backgroundColor: "#16213e",
-    borderRadius: 12, // isTablet ? 16 : 12
+    borderRadius: 12,
     width: "95%",
-    maxWidth: 500, // isTablet ? 500 : 400
+    maxWidth: 500,
     maxHeight: "80%",
     borderWidth: 2,
     borderColor: "#0f3460",
@@ -1423,56 +1539,107 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20, // isTablet ? 20 : 16
+    padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: "#0f3460",
-    minHeight: 64, // minTouchTarget + 20
+    minHeight: 64,
   },
   moveHistoryTitle: {
     color: "#e2e8f0",
-    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontSize: 20,
     fontWeight: "bold",
-    marginBottom: 24, // isTablet ? 24 : 20
     textAlign: "center",
   },
   closeButton: {
-    padding: 12, // isTablet ? 12 : 8
-    minWidth: 44, // minTouchTarget
-    minHeight: 44, // minTouchTarget
+    padding: 12,
+    minWidth: 44,
+    minHeight: 44,
     justifyContent: "center",
     alignItems: "center",
   },
   closeButtonText: {
     color: "#94a3b8",
-    fontSize: 20, // isTablet ? 20 : 18
+    fontSize: 20,
     fontWeight: "bold",
   },
   moveHistoryScroll: {
     flex: 1,
-    padding: 20, // isTablet ? 20 : 16
+    padding: 20,
   },
   moveRow: {
     flexDirection: "row",
-    marginBottom: 12, // isTablet ? 12 : 8
-    paddingVertical: 6, // isTablet ? 6 : 4
+    marginBottom: 12,
+    paddingVertical: 6,
     alignItems: "center",
   },
   moveNumber: {
     color: "#94a3b8",
-    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
-    width: 40, // isTablet ? 40 : 30
+    fontSize: 16,
+    width: 40,
     fontWeight: "bold",
   },
   moveText: {
     color: "#e2e8f0",
-    fontSize: 16, // isTablet ? 16 : isSmallScreen ? 12 : 14
-    width: 80, // isTablet ? 80 : 60
-    marginHorizontal: 12, // isTablet ? 12 : 8
+    fontSize: 16,
+    width: 80,
+    marginHorizontal: 12,
+  },
+  gameEndModal: {
+    backgroundColor: "#16213e",
+    borderRadius: 16,
+    padding: 32,
+    alignItems: "center",
+    borderWidth: 3,
+    borderColor: "#0f3460",
+    maxWidth: "90%",
+    minWidth: 300,
+  },
+  victoryModal: {
+    borderColor: "#4ade80",
+    backgroundColor: "#1e3a2e",
+  },
+  defeatModal: {
+    borderColor: "#ef4444",
+    backgroundColor: "#3a1e1e",
+  },
+  gameEndTitle: {
+    fontSize: 28,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 20,
+    color: "#e2e8f0",
+  },
+  victoryTitle: {
+    color: "#4ade80",
+  },
+  defeatTitle: {
+    color: "#ef4444",
+  },
+  gameEndMessage: {
+    fontSize: 18,
+    textAlign: "center",
+    marginBottom: 30,
+    color: "#e2e8f0",
+    lineHeight: 24,
+  },
+  menuButton: {
+    backgroundColor: "#4f46e5",
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 12,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  menuButtonText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
   },
   promotionModal: {
     backgroundColor: "#16213e",
-    borderRadius: 12, // isTablet ? 16 : 12
-    padding: 24, // isTablet ? 32 : 24
+    borderRadius: 12,
+    padding: 24,
     alignItems: "center",
     borderWidth: 2,
     borderColor: "#0f3460",
@@ -1480,44 +1647,44 @@ const styles = StyleSheet.create({
   },
   promotionTitle: {
     color: "#e2e8f0",
-    fontSize: 20, // isTablet ? 20 : isSmallScreen ? 16 : 18
+    fontSize: 20,
     fontWeight: "bold",
-    marginBottom: 24, // isTablet ? 24 : 20
+    marginBottom: 24,
     textAlign: "center",
   },
   promotionOptions: {
     flexDirection: "row",
     justifyContent: "center",
-    marginBottom: 24, // isTablet ? 24 : 20
+    marginBottom: 24,
     flexWrap: "wrap",
   },
   promotionOption: {
-    margin: 12, // isTablet ? 12 : 8
-    padding: 16, // isTablet ? 20 : 16
-    backgroundColor: "#0f3460",
-    borderRadius: 10, // isTablet ? 12 : 8
+    margin: 12,
+    padding: 16,
+    backgroundColor: "#0f172a",
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "#334155",
-    minWidth: 54, // minTouchTarget + 10
-    minHeight: 54, // minTouchTarget + 10
+    minWidth: 54,
+    minHeight: 54,
     justifyContent: "center",
     alignItems: "center",
   },
   promotionPiece: {
-    fontSize: 32, // isTablet ? 40 : isSmallScreen ? 28 : 32
+    fontSize: 32,
     textAlign: "center",
   },
   cancelButton: {
-    paddingHorizontal: 24, // isTablet ? 24 : 20
-    paddingVertical: 14, // isTablet ? 14 : 10
+    paddingHorizontal: 24,
+    paddingVertical: 14,
     backgroundColor: "#374151",
-    borderRadius: 10, // isTablet ? 10 : 8
-    minHeight: 44, // minTouchTarget
+    borderRadius: 10,
+    minHeight: 44,
     justifyContent: "center",
     alignItems: "center",
   },
   cancelButtonText: {
     color: "#94a3b8",
-    fontSize: 18, // isTablet ? 18 : 16
+    fontSize: 18,
   },
 })
