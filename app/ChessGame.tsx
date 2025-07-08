@@ -16,6 +16,28 @@ interface Player {
   title: string | null
 }
 
+interface DecayTimer {
+  active: boolean
+  timeRemaining: number
+  moveCount: number
+  frozen: boolean
+  startTimestamp: number | null
+  lastUpdateTimestamp: number | null
+  pieceType?: string | null
+  pieceSquare?: string | null
+}
+
+interface DecayTimers {
+  white: {
+    queen: DecayTimer
+    majorPiece: DecayTimer
+  }
+  black: {
+    queen: DecayTimer
+    majorPiece: DecayTimer
+  }
+}
+
 interface GameState {
   sessionId: string
   variantName: string
@@ -87,6 +109,13 @@ interface GameState {
     gameEnded?: boolean
     endReason?: string | null
     endTimestamp?: number
+    // Decay-specific fields
+    decayActive?: boolean
+    decayTimers?: DecayTimers
+    frozenPieces?: {
+      white: string[]
+      black: string[]
+    }
   }
   userColor: {
     [key: string]: "white" | "black"
@@ -110,7 +139,7 @@ interface Move {
 interface ChessGameProps {
   initialGameState: GameState
   userId: string
-  onNavigateToMenu?: () => void // Callback to navigate back to menu
+  onNavigateToMenu?: () => void
 }
 
 const PIECE_SYMBOLS = {
@@ -146,7 +175,53 @@ const PIECE_VALUES = {
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
 
-export default function ChessGame({ initialGameState, userId, onNavigateToMenu }: ChessGameProps) {
+// Decay Timer Component
+const DecayTimerDisplay = ({
+  timeRemaining,
+  isActive,
+  isPaused,
+  squareSize,
+}: {
+  timeRemaining: number
+  isActive: boolean
+  isPaused: boolean
+  squareSize: number
+}) => {
+  if (!isActive || timeRemaining <= 0) return null
+
+  const formatDecayTime = (ms: number): string => {
+    const seconds = Math.ceil(ms / 1000)
+    return `${seconds}s`
+  }
+
+  return (
+    <View
+      style={[
+        styles.decayTimer,
+        {
+          width: squareSize * 0.8,
+          height: squareSize * 0.25,
+          top: -squareSize * 0.15,
+        },
+        isPaused && styles.decayTimerPaused,
+        timeRemaining <= 5000 && styles.decayTimerCritical,
+      ]}
+    >
+      <Text
+        style={[
+          styles.decayTimerText,
+          { fontSize: Math.min(squareSize * 0.15, 12) },
+          isPaused && styles.decayTimerTextPaused,
+          timeRemaining <= 5000 && styles.decayTimerTextCritical,
+        ]}
+      >
+        {formatDecayTime(timeRemaining)}
+      </Text>
+    </View>
+  )
+}
+
+export default function DecayChessGame({ initialGameState, userId, onNavigateToMenu }: ChessGameProps) {
   const router = useRouter()
   const [gameState, setGameState] = useState<GameState>(initialGameState)
   const [socket, setSocket] = useState<Socket | null>(null)
@@ -168,7 +243,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const [showGameEndModal, setShowGameEndModal] = useState(false)
   const [gameEndMessage, setGameEndMessage] = useState("")
   const [isWinner, setIsWinner] = useState<boolean | null>(null)
-  // Details for UI: reason, move, winner, winnerName
   const [gameEndDetails, setGameEndDetails] = useState<{
     reason?: string
     moveSan?: string
@@ -181,10 +255,61 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const lastUpdateRef = useRef<number>(Date.now())
   const gameStartTimeRef = useRef<number | null>(null)
-  const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
+  const isFirstMoveRef = useRef<boolean>(true)
   const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Timer sync state - improved timer management
+  // Decay-specific state
+  const [localDecayTimers, setLocalDecayTimers] = useState<DecayTimers>({
+    white: {
+      queen: {
+        active: false,
+        timeRemaining: 0,
+        moveCount: 0,
+        frozen: false,
+        startTimestamp: null,
+        lastUpdateTimestamp: null,
+      },
+      majorPiece: {
+        active: false,
+        timeRemaining: 0,
+        moveCount: 0,
+        frozen: false,
+        startTimestamp: null,
+        lastUpdateTimestamp: null,
+        pieceType: null,
+        pieceSquare: null,
+      },
+    },
+    black: {
+      queen: {
+        active: false,
+        timeRemaining: 0,
+        moveCount: 0,
+        frozen: false,
+        startTimestamp: null,
+        lastUpdateTimestamp: null,
+      },
+      majorPiece: {
+        active: false,
+        timeRemaining: 0,
+        moveCount: 0,
+        frozen: false,
+        startTimestamp: null,
+        lastUpdateTimestamp: null,
+        pieceType: null,
+        pieceSquare: null,
+      },
+    },
+  })
+
+  const decayTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastDecayUpdateRef = useRef<number>(Date.now())
+
+  // Check if this is a decay variant
+  const isDecayVariant =
+    gameState.variantName?.toLowerCase().includes("decay") || gameState.subvariantName?.toLowerCase().includes("decay")
+
+  // Timer sync state
   function safeTimerValue(val: any): number {
     const n = Number(val)
     return isNaN(n) || n === undefined || n === null ? 0 : Math.max(0, n)
@@ -195,7 +320,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     black: safeTimerValue(initialGameState.timeControl.timers.black),
   })
 
-  // Track the last known server state for accurate local countdown
   const lastServerSync = useRef<{
     white: number
     black: number
@@ -217,30 +341,79 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const isTablet = Math.min(screenWidth, screenHeight) > 600
   const isSmallScreen = Math.min(screenWidth, screenHeight) < 400
 
-  // Calculate responsive sizes
   const containerPadding = isTablet ? 24 : isSmallScreen ? 12 : 16
   const boardSize = Math.min(screenWidth - containerPadding * 2, screenHeight * 0.5, isTablet ? 500 : 380)
   const squareSize = boardSize / 8
-  const minTouchTarget = 44 // Minimum touch target size for accessibility
+  const minTouchTarget = 44
 
-  // Responsive text sizes
   const baseFontSize = isTablet ? 18 : isSmallScreen ? 14 : 16
   const titleFontSize = isTablet ? 24 : isSmallScreen ? 18 : 20
   const smallFontSize = isTablet ? 14 : isSmallScreen ? 11 : 12
 
+  // Update decay timers from server state
+  const updateDecayTimersFromServer = (serverDecayTimers: DecayTimers) => {
+    if (!isDecayVariant || !serverDecayTimers) return
+
+    const now = Date.now()
+    setLocalDecayTimers(serverDecayTimers)
+    lastDecayUpdateRef.current = now
+
+    console.log("[DECAY] Updated decay timers from server:", serverDecayTimers)
+  }
+
+  // Start local decay timer countdown
+  const startDecayTimerCountdown = () => {
+    if (!isDecayVariant) return
+
+    if (decayTimerRef.current) {
+      clearInterval(decayTimerRef.current)
+    }
+
+    decayTimerRef.current = setInterval(() => {
+      const now = Date.now()
+      const elapsed = now - lastDecayUpdateRef.current
+
+      setLocalDecayTimers((prev) => {
+        const newTimers = { ...prev }
+        const colors: ("white" | "black")[] = ["white", "black"]
+
+        colors.forEach((color) => {
+          // Only countdown if it's this player's turn and the timer is active
+          const isPlayerTurn = gameState.board.activeColor === color
+
+          // Update queen timer
+          if (newTimers[color].queen.active && !newTimers[color].queen.frozen && isPlayerTurn) {
+            newTimers[color].queen.timeRemaining = Math.max(0, newTimers[color].queen.timeRemaining - elapsed)
+          }
+
+          // Update major piece timer
+          if (newTimers[color].majorPiece.active && !newTimers[color].majorPiece.frozen && isPlayerTurn) {
+            newTimers[color].majorPiece.timeRemaining = Math.max(0, newTimers[color].majorPiece.timeRemaining - elapsed)
+          }
+        })
+
+        return newTimers
+      })
+
+      lastDecayUpdateRef.current = now
+    }, 100) // Update every 100ms for smooth countdown
+  }
+
   // Function to handle game ending
-  // Accepts extra details for UI
   const handleGameEnd = (
     result: string,
     winner: string | null,
     endReason: string,
-    details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null }
+    details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null },
   ) => {
     console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
 
     // Stop all timers
     if (timerRef.current) {
       clearInterval(timerRef.current)
+    }
+    if (decayTimerRef.current) {
+      clearInterval(decayTimerRef.current)
     }
 
     // Determine if current player won
@@ -280,8 +453,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     setIsWinner(playerWon)
     setGameEndMessage(message)
     setShowGameEndModal(true)
-
-    // Set details for UI
     setGameEndDetails({
       reason: endReason,
       moveSan: details?.moveSan,
@@ -305,8 +476,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       if (onNavigateToMenu) {
         onNavigateToMenu()
       }
-      // Redirect to /choose after 5 seconds
-      router.replace('/choose')
+      router.replace("/choose")
     }, 5000)
   }
 
@@ -332,6 +502,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       setSocket(gameSocket)
       console.log("Connected to game socket")
     }
+
     if (!gameSocket) {
       console.error("Failed to connect to game socket")
       Alert.alert("Connection Error", "Failed to connect to game socket. Please try again.")
@@ -345,10 +516,14 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     setBoardFlipped(safePlayerColor === "black")
     setIsMyTurn(gameState.board.activeColor === safePlayerColor)
 
+    // Initialize decay timers if this is a decay variant
+    if (isDecayVariant && gameState.gameState?.decayTimers) {
+      updateDecayTimersFromServer(gameState.gameState.decayTimers)
+    }
+
     // Check if this is the first move based on move history
     const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
     isFirstMoveRef.current = moveCount === 0
-
     console.log("[INIT] Move count:", moveCount, "Is first move:", isFirstMoveRef.current)
 
     // Initialize game start time
@@ -359,6 +534,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current)
+      }
+      if (decayTimerRef.current) {
+        clearInterval(decayTimerRef.current)
       }
       if (navigationTimeoutRef.current) {
         clearTimeout(navigationTimeoutRef.current)
@@ -373,6 +551,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     setPlayerColor(safePlayerColor)
     setBoardFlipped(safePlayerColor === "black")
     setIsMyTurn(gameState.board.activeColor === safePlayerColor)
+
     console.log(
       "[DEBUG] userId:",
       userId,
@@ -398,6 +577,11 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     socket.on("game:end", handleGameEndEvent)
     socket.on("game:error", handleGameError)
 
+    // Decay-specific events
+    if (isDecayVariant) {
+      socket.on("game:decayUpdate", handleDecayUpdate)
+    }
+
     return () => {
       socket.off("game:move", handleGameMove)
       socket.off("game:possibleMoves", handlePossibleMoves)
@@ -405,8 +589,31 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       socket.off("game:timer", handleTimerUpdate)
       socket.off("game:end", handleGameEndEvent)
       socket.off("game:error", handleGameError)
+
+      if (isDecayVariant) {
+        socket.off("game:decayUpdate", handleDecayUpdate)
+      }
     }
-  }, [socket, playerColor])
+  }, [socket, playerColor, isDecayVariant])
+
+  // Start decay timer countdown when game state changes
+  useEffect(() => {
+    if (isDecayVariant && gameState.status === "active" && !gameState.gameState?.gameEnded) {
+      startDecayTimerCountdown()
+    }
+
+    return () => {
+      if (decayTimerRef.current) {
+        clearInterval(decayTimerRef.current)
+      }
+    }
+  }, [
+    isDecayVariant,
+    gameState.status,
+    gameState.board.activeColor,
+    gameState.gameState?.gameEnded,
+    gameState.gameState?.decayActive,
+  ])
 
   // Improved timer effect with proper turn-based countdown
   useEffect(() => {
@@ -420,12 +627,8 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
     // Update server sync reference when game state changes
     const now = Date.now()
-
-    // Use the most recent timer values from gameState
     const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
     const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
-
-    // Check if this is still the first move
     const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
     const isFirstMove = moveCount === 0
 
@@ -440,22 +643,18 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
     console.log("[TIMER] Setting up timer for active color:", gameState.board.activeColor)
     console.log("[TIMER] Move count:", moveCount, "Is first move:", isFirstMove)
-    console.log("[TIMER] Server sync values - White:", currentWhiteTime, "Black:", currentBlackTime)
-    console.log("[TIMER] Local timer values - White:", localTimers.white, "Black:", localTimers.black)
 
     // Start local timer countdown
     timerRef.current = setInterval(() => {
       const now = Date.now()
       const serverSync = lastServerSync.current
-
-      // Calculate elapsed time since the server sync
       const elapsedSinceSync = now - serverSync.timestamp
 
       setLocalTimers((prev) => {
         let newWhite = serverSync.white
         let newBlack = serverSync.black
 
-        // CRITICAL: Only countdown for the active player, and only if it's not the first move
+        // Only countdown for the active player, and only if it's not the first move
         if (!serverSync.isFirstMove) {
           if (serverSync.activeColor === "white") {
             newWhite = Math.max(0, serverSync.white - elapsedSinceSync)
@@ -475,7 +674,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
           handleGameEnd("timeout", "black", "White ran out of time")
           return { white: 0, black: newBlack }
         }
-
         if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
           console.log("BLACK TIMEOUT DETECTED - Ending game")
           handleGameEnd("timeout", "white", "Black ran out of time")
@@ -484,7 +682,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
         return { white: newWhite, black: newBlack }
       })
-    }, 100) // Update every 100ms for smooth countdown
+    }, 100)
 
     return () => {
       if (timerRef.current) {
@@ -497,9 +695,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     gameState.timeControl.timers.white,
     gameState.timeControl.timers.black,
     gameState.board.turnStartTimestamp,
-    gameState.moves?.length, // Add move count as dependency
-    gameState.board?.moveHistory?.length, // Add move history length as dependency
-    gameState.gameState?.gameEnded, // Add this dependency
+    gameState.moves?.length,
+    gameState.board?.moveHistory?.length,
+    gameState.gameState?.gameEnded,
   ])
 
   const handleGameMove = (data: any) => {
@@ -521,11 +719,10 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         wasFirstMove,
       )
 
-      // Extract timer values from the response - try multiple possible locations
-      let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white) // fallback to current
-      let newBlackTime = safeTimerValue(gameState.timeControl.timers.black) // fallback to current
+      // Extract timer values from the response
+      let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
+      let newBlackTime = safeTimerValue(gameState.timeControl.timers.black)
 
-      // Try to get updated timer values from various possible locations in the response
       if (data.gameState.timeControl?.timers?.white !== undefined) {
         newWhiteTime = safeTimerValue(data.gameState.timeControl.timers.white)
       } else if (data.gameState.board?.whiteTime !== undefined) {
@@ -538,29 +735,29 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         newBlackTime = safeTimerValue(data.gameState.board.blackTime)
       }
 
-      console.log("[MOVE] Timer values from server - White:", newWhiteTime, "Black:", newBlackTime)
-      console.log("[MOVE] Previous local timers - White:", localTimers.white, "Black:", localTimers.black)
-
-      // For the first move, preserve the initial timer values and don't use the move response values
+      // For the first move, preserve the initial timer values
       if (wasFirstMove) {
         console.log("[MOVE] First move detected - preserving initial timer values")
         newWhiteTime = localTimers.white
         newBlackTime = localTimers.black
       }
 
-      // CRITICAL: Update server sync reference with preserved values for first move
+      // Update decay timers if this is a decay variant
+      if (isDecayVariant && data.gameState.gameState?.decayTimers) {
+        updateDecayTimersFromServer(data.gameState.gameState.decayTimers)
+      }
+
+      // Update server sync reference
       lastServerSync.current = {
         white: newWhiteTime,
         black: newBlackTime,
-        activeColor: data.gameState.board.activeColor, // This is whose turn it is NOW
+        activeColor: data.gameState.board.activeColor,
         timestamp: now,
         turnStartTime: data.gameState.board.turnStartTimestamp || now,
-        isFirstMove: newMoveCount === 0, // Update first move status
+        isFirstMove: newMoveCount === 0,
       }
 
-      console.log("[MOVE] Updated server sync - Active color:", data.gameState.board.activeColor)
-
-      // Check if the game has ended due to checkmate or other conditions
+      // Check if the game has ended
       if (
         data.gameState.gameState?.gameEnded ||
         data.gameState.gameState?.checkmate ||
@@ -568,38 +765,32 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         data.gameState.shouldNavigateToMenu
       ) {
         console.log("[MOVE] Game ended detected:", data.gameState.gameState)
-
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
 
-        // FIXED: Get the actual winner color from the game state
         let winner = data.gameState.gameState?.winner || data.gameState.winner
-
-        // If winner is still a color string, use it directly
         if (winner === "white" || winner === "black") {
           // Winner is already the color, use it as is
         } else if (data.gameState.gameState?.winnerColor) {
-          // Use winnerColor if available
           winner = data.gameState.gameState.winnerColor
         } else if (result === "checkmate") {
-          // Fallback: determine winner from active color (the player who got checkmated loses)
           const checkmatedPlayer = data.gameState.board.activeColor
           winner = checkmatedPlayer === "white" ? "black" : "white"
         }
 
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
-
-        // Print the reason, who made the move, and declare the winner
         const lastMove = data.gameState.move || data.move
-        let moveMaker = lastMove?.color || "unknown"
-        let moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+        const moveMaker = lastMove?.color || "unknown"
+        const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
         let winnerName = null
+
         if (winner && data.gameState.players && data.gameState.players[winner]) {
           winnerName = data.gameState.players[winner].username
         }
+
         console.log(
           `[GAME ENDED] Reason: ${endReason}\n` +
-          `Move: ${moveSan} by ${moveMaker}\n` +
-          `Winner: ${winner}${winnerName ? ` (${winnerName})` : ""}`
+            `Move: ${moveSan} by ${moveMaker}\n` +
+            `Winner: ${winner}${winnerName ? ` (${winnerName})` : ""}`,
         )
 
         handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
@@ -626,19 +817,15 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         moveCount: data.gameState.moveCount,
       }))
 
-      // Update local timers with preserved values
       setLocalTimers({
         white: newWhiteTime,
         black: newBlackTime,
       })
 
-      console.log("[MOVE] Updated local timers to - White:", newWhiteTime, "Black:", newBlackTime)
-
       setMoveHistory(data.gameState.moves || [])
       setSelectedSquare(null)
       setPossibleMoves([])
 
-      // Use the updated activeColor from the new gameState
       const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
       const activeColor = data.gameState.board.activeColor
       const newIsMyTurn = activeColor === userColor
@@ -652,6 +839,14 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         "Is my turn:",
         newIsMyTurn,
       )
+    }
+  }
+
+  // Handle decay timer updates
+  const handleDecayUpdate = (data: any) => {
+    console.log("[DECAY] Decay update received:", data)
+    if (data.decayTimers) {
+      updateDecayTimersFromServer(data.decayTimers)
     }
   }
 
@@ -676,6 +871,11 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const handleGameStateUpdate = (data: any) => {
     console.log("Game state update:", data)
     if (data && data.gameState) {
+      // Update decay timers if this is a decay variant
+      if (isDecayVariant && data.gameState.gameState?.decayTimers) {
+        updateDecayTimersFromServer(data.gameState.gameState.decayTimers)
+      }
+
       // Check for game ending
       if (
         data.gameState.gameState?.gameEnded ||
@@ -683,17 +883,13 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         data.gameState.shouldNavigateToMenu
       ) {
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
-
-        // FIXED: Get the actual winner color
         let winner = data.gameState.gameState?.winner || data.gameState.winner
         if (winner === "white" || winner === "black") {
           // Winner is already the color
         } else if (data.gameState.gameState?.winnerColor) {
           winner = data.gameState.gameState.winnerColor
         }
-
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
-
         handleGameEnd(result, winner, endReason)
         return
       }
@@ -720,6 +916,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
           },
         },
       }))
+
       setIsMyTurn(data.gameState.board.activeColor === playerColor)
     }
   }
@@ -735,37 +932,33 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       return
     }
 
-    // FIXED: Handle different timer update formats from server
+    // Handle different timer update formats from server
     let whiteTime: number
     let blackTime: number
 
     if (data.timers && typeof data.timers === "object") {
-      // Format: { timers: { white: number, black: number } }
       whiteTime = safeTimerValue(data.timers.white)
       blackTime = safeTimerValue(data.timers.black)
     } else if (typeof data.timers === "number" && typeof data.black === "number") {
-      // Format: { timers: number, black: number } - timers is white time
       whiteTime = safeTimerValue(data.timers)
       blackTime = safeTimerValue(data.black)
     } else {
-      // Fallback format: { white: number, black: number }
       whiteTime = safeTimerValue(data.white ?? data.timers?.white)
       blackTime = safeTimerValue(data.black ?? data.timers?.black)
     }
 
     console.log("[TIMER UPDATE] Parsed values - White:", whiteTime, "Black:", blackTime)
 
-    // Check if this is still the first move
     const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
     const isFirstMove = moveCount === 0
 
-    // Update server sync reference with the correct values
+    // Update server sync reference
     lastServerSync.current = {
       white: whiteTime,
       black: blackTime,
       activeColor: gameState.board.activeColor,
       timestamp: Date.now(),
-      turnStartTime: Date.now(), // Reset turn start time on timer update
+      turnStartTime: Date.now(),
       isFirstMove: isFirstMove,
     }
 
@@ -785,15 +978,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         },
       },
     }))
-
-    console.log(
-      "[TIMER UPDATE] Updated local timers to - White:",
-      whiteTime,
-      "Black:",
-      blackTime,
-      "Is first move:",
-      isFirstMove,
-    )
   }
 
   // Handles the 'game:timer' event from the server
@@ -804,19 +988,14 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   // Handles the 'game:end' event from the server
   const handleGameEndEvent = (data: any) => {
     console.log("Game end event received:", data)
-
     const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
-
-    // FIXED: Get the actual winner color
     let winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
     if (winner === "white" || winner === "black") {
       // Winner is already the color
     } else if (data.gameState?.gameState?.winnerColor) {
       winner = data.gameState.gameState.winnerColor
     }
-
     const endReason = data.gameState?.gameState?.endReason || data.gameState?.endReason || data.endReason || result
-
     handleGameEnd(result, winner, endReason)
   }
 
@@ -846,6 +1025,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       "activeColor:",
       gameState.board.activeColor,
     )
+
     if (!socket || !isMyTurn) {
       console.log("[DEBUG] Not emitting move: socket or isMyTurn false")
       return
@@ -860,6 +1040,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       move: { from: move.from, to: move.to, promotion: move.promotion },
       timestamp: Date.now(),
     })
+
     console.log("[DEBUG] Move emitted:", { from: move.from, to: move.to, promotion: move.promotion })
   }
 
@@ -874,8 +1055,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     if (selectedSquare && possibleMoves.includes(square)) {
       // Check if this move is a promotion
       const promotionOptions: string[] = []
-
-      // Check for promotion moves (simplified logic)
       const piece = getPieceAt(selectedSquare)
       const isPromotion =
         piece &&
@@ -897,12 +1076,37 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     // Only allow selecting a piece if it's the player's turn and the piece belongs to them
     const piece = getPieceAt(square)
     if (isMyTurn && piece && isPieceOwnedByPlayer(piece, playerColor)) {
+      // Check if piece is frozen in decay variant
+      if (isDecayVariant && isPieceFrozen(square, piece, playerColor)) {
+        Alert.alert("Piece Frozen", "This piece is frozen due to decay timer expiration and cannot be moved.")
+        return
+      }
+
       setSelectedSquare(square)
       requestPossibleMoves(square)
     } else {
       setSelectedSquare(null)
       setPossibleMoves([])
     }
+  }
+
+  // Check if a piece is frozen in decay variant
+  const isPieceFrozen = (square: string, piece: string, color: "white" | "black"): boolean => {
+    if (!isDecayVariant || !gameState.gameState?.frozenPieces) return false
+
+    const frozenPieces = gameState.gameState.frozenPieces[color] || []
+
+    // Check if queen is frozen
+    if (frozenPieces.includes("queen") && piece.toLowerCase() === "q") {
+      return true
+    }
+
+    // Check if specific square is frozen (for major pieces)
+    if (frozenPieces.includes(square)) {
+      return true
+    }
+
+    return false
   }
 
   // Handle promotion selection
@@ -913,6 +1117,33 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       setSelectedSquare(null)
       setPossibleMoves([])
     }
+  }
+
+  // Get decay timer for a specific square and piece
+  const getDecayTimerForPiece = (square: string, piece: string, color: "white" | "black") => {
+    if (!isDecayVariant || !localDecayTimers) return null
+
+    const timers = localDecayTimers[color]
+
+    // Check queen timer
+    if (piece.toLowerCase() === "q" && timers.queen.active && !timers.queen.frozen) {
+      return {
+        timeRemaining: timers.queen.timeRemaining,
+        isActive: true,
+        isPaused: gameState.board.activeColor !== color, // Pause when it's not player's turn
+      }
+    }
+
+    // Check major piece timer
+    if (timers.majorPiece.active && !timers.majorPiece.frozen && timers.majorPiece.pieceSquare === square) {
+      return {
+        timeRemaining: timers.majorPiece.timeRemaining,
+        isActive: true,
+        isPaused: gameState.board.activeColor !== color, // Pause when it's not player's turn
+      }
+    }
+
+    return null
   }
 
   // Correct FEN parsing for piece lookup
@@ -964,7 +1195,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   // Calculate material advantage
   const calculateMaterialAdvantage = () => {
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
-
     let whiteAdvantage = 0
     let blackAdvantage = 0
 
@@ -982,7 +1212,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const renderCapturedPieces = (color: "white" | "black") => {
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
     const pieces = capturedPieces[color] || []
-
     if (pieces.length === 0) return null
 
     // Group pieces by type and count them
@@ -1030,6 +1259,17 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
     const piece = getPieceAt(square)
 
+    // Get decay timer for this piece if it's a decay variant
+    let decayTimer = null
+    if (isDecayVariant && piece) {
+      const pieceColor = piece === piece.toUpperCase() ? "white" : "black"
+      decayTimer = getDecayTimerForPiece(square, piece, pieceColor)
+    }
+
+    // Check if piece is frozen
+    const pieceColor = piece ? (piece === piece.toUpperCase() ? "white" : "black") : null
+    const isFrozen = isDecayVariant && piece && pieceColor && isPieceFrozen(square, piece, pieceColor)
+
     return (
       <TouchableOpacity
         key={square}
@@ -1042,6 +1282,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
             borderWidth: isPossibleMove ? 3 : isSelected ? 3 : isLastMove ? 2 : 0,
             borderColor: isPossibleMove ? "#4ade80" : isSelected ? "#60a5fa" : isLastMove ? "#fbbf24" : "transparent",
           },
+          isFrozen && styles.frozenSquare,
         ]}
         onPress={() => handleSquarePress(square)}
       >
@@ -1057,6 +1298,17 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
           </Text>
         )}
 
+        {/* Decay timer display */}
+        {decayTimer && (
+          <DecayTimerDisplay
+            timeRemaining={decayTimer.timeRemaining}
+            isActive={decayTimer.isActive}
+            isPaused={decayTimer.isPaused}
+            squareSize={squareSize}
+          />
+        )}
+
+        {/* Piece */}
         {piece && (
           <Text
             style={[
@@ -1064,11 +1316,20 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
               {
                 fontSize: Math.min(squareSize * 0.7, isTablet ? 40 : isSmallScreen ? 24 : 32),
               },
+              isFrozen && styles.frozenPiece,
             ]}
           >
             {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
           </Text>
         )}
+
+        {/* Frozen indicator */}
+        {isFrozen && (
+          <View style={styles.frozenIndicator}>
+            <Text style={styles.frozenText}>❄️</Text>
+          </View>
+        )}
+
         {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
         {isPossibleMove && piece && <View style={styles.captureIndicator} />}
       </TouchableOpacity>
@@ -1097,6 +1358,10 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         <Text style={[styles.turnIndicator, isMyTurnActive && styles.myTurnIndicator]}>
           {isMyTurnActive ? "🎯 Your Turn" : `⏳ ${activePlayerName}'s Turn`}
         </Text>
+        {/* Show decay status if this is a decay variant */}
+        {isDecayVariant && gameState.gameState?.decayActive && (
+          <Text style={styles.decayStatus}>⚡ Decay Mode Active</Text>
+        )}
       </View>
     )
   }
@@ -1143,7 +1408,10 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
               <Text
                 style={[
                   styles.playerColorIndicator,
-                  { color: color === "white" ? "#fff" : "#000", backgroundColor: color === "white" ? "#000" : "#fff" },
+                  {
+                    color: color === "white" ? "#fff" : "#000",
+                    backgroundColor: color === "white" ? "#000" : "#fff",
+                  },
                 ]}
               >
                 {color === "white" ? "♔" : "♚"}
@@ -1154,14 +1422,11 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
             <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
             {advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
           </View>
-
           <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
             <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
           </View>
         </View>
-
         {renderCapturedPieces(color)}
-
         {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
       </View>
     )
@@ -1172,7 +1437,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
     const moves = moveHistory
     const movePairs = []
-
     for (let i = 0; i < moves.length; i += 2) {
       movePairs.push({
         moveNumber: Math.floor(i / 2) + 1,
@@ -1266,31 +1530,29 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
               {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
             </Text>
             <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
+
             {/* Show extra details if available */}
             {(gameEndDetails.reason || gameEndDetails.moveSan || gameEndDetails.winner) && (
               <View style={{ marginBottom: 16, marginTop: -10 }}>
                 {gameEndDetails.reason && (
-                  <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
+                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
                     Reason: {gameEndDetails.reason}
                   </Text>
                 )}
                 {gameEndDetails.moveSan && (
-                  <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
+                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
                     Move: {gameEndDetails.moveSan}
-                    {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ''}
+                    {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ""}
                   </Text>
                 )}
                 {gameEndDetails.winner && (
-                  <Text style={{ color: '#4ade80', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
+                  <Text style={{ color: "#4ade80", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
                     Winner: {gameEndDetails.winner}
-                    {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ''}
+                    {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ""}
                   </Text>
                 )}
               </View>
             )}
-            {/* <TouchableOpacity style={styles.menuButton} onPress={navigateToMenu}>
-              <Text style={styles.menuButtonText}>Return to Menu</Text>
-            </TouchableOpacity> */}
           </View>
         </View>
       </Modal>
@@ -1486,6 +1748,13 @@ const styles = StyleSheet.create({
   myTurnIndicator: {
     color: "#4ade80",
   },
+  decayStatus: {
+    color: "#fbbf24",
+    fontSize: 14,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 4,
+  },
   gameOverText: {
     color: "#94a3b8",
     fontSize: 16,
@@ -1516,6 +1785,10 @@ const styles = StyleSheet.create({
     minHeight: 35.2,
     minWidth: 35.2,
   },
+  frozenSquare: {
+    backgroundColor: "#1e3a8a",
+    opacity: 0.8,
+  },
   coordinateLabel: {
     position: "absolute",
     fontSize: 12,
@@ -1534,6 +1807,44 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
+  },
+  frozenPiece: {
+    opacity: 0.6,
+  },
+  frozenIndicator: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+  },
+  frozenText: {
+    fontSize: 12,
+  },
+  decayTimer: {
+    position: "absolute",
+    backgroundColor: "#ef4444",
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
+  },
+  decayTimerPaused: {
+    backgroundColor: "#6b7280",
+  },
+  decayTimerCritical: {
+    backgroundColor: "#dc2626",
+  },
+  decayTimerText: {
+    color: "#fff",
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  decayTimerTextPaused: {
+    color: "#d1d5db",
+  },
+  decayTimerTextCritical: {
+    color: "#fff",
   },
   possibleMoveDot: {
     position: "absolute",
