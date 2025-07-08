@@ -5,7 +5,9 @@ let socketInstance = null;
 export const getSocket = (
   userId,
   connectionType,
-  sessionId
+  sessionId,
+  variant,
+  subvariant
 ) => {
   if (!socketInstance || !socketInstance.connected) {
     console.log(userId, connectionType, sessionId);
@@ -27,7 +29,7 @@ export const getSocket = (
     const socketUrl = `http://localhost:3000${namespace}`;
     const socketOptions = {
       path: "/socket.io",
-      auth: { userId, sessionId },
+      auth: { userId, sessionId, variant, subvariant },
       transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: 5,

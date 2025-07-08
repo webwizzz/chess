@@ -114,7 +114,7 @@ export default function MatchMaking() {
 
         const sessionId = response.sessionId;
         console.log("Match found! Session ID:", sessionId);
-        const gameSocket = getSocket(userId, "game", sessionId);
+        const gameSocket = getSocket(userId, "game", sessionId, variant, subvariant);
         if (!gameSocket) {
           console.error("Failed to get game socket instance");
           alert("Failed to connect to game. Please try again.");

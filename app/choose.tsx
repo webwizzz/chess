@@ -50,7 +50,7 @@ export default function Choose() {
   const handleVariantSelect = async (variant: string) => {
     if (!userId) return;
 
-    if (variant === "Classic") {
+    if (variant === "classic") {
       router.replace({pathname: "/classictimecontrol", params: {userId}} as any);
       return;
     }
@@ -115,7 +115,7 @@ export default function Choose() {
             elevation: 3,
           }}
           activeOpacity={0.85}
-          onPress={() => handleVariantSelect(variant.title)}
+          onPress={() => handleVariantSelect(variant.title.toLowerCase())}
           disabled={!userId || socketConnecting}
         >
           <Text

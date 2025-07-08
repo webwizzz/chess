@@ -30,11 +30,11 @@ export default function ClassicTimeControl() {
       socketInstance.connect();
   
       socketInstance.on("connect", () => {
-        socketInstance.emit("queue:join", { userId, variant: "Classic", subvariant });
+        socketInstance.emit("queue:join", { userId, variant: "classic", subvariant });
         setSocketConnecting(false);
         router.push({
           pathname: "/matchmaking",
-          params: { variant: "Classic", subvariant, userId},
+          params: { variant: "classic", subvariant, userId},
         });
       });
   

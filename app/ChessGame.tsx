@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
@@ -146,6 +147,7 @@ const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
 
 export default function ChessGame({ initialGameState, userId, onNavigateToMenu }: ChessGameProps) {
+  const router = useRouter()
   const [gameState, setGameState] = useState<GameState>(initialGameState)
   const [socket, setSocket] = useState<Socket | null>(null)
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
@@ -166,6 +168,14 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const [showGameEndModal, setShowGameEndModal] = useState(false)
   const [gameEndMessage, setGameEndMessage] = useState("")
   const [isWinner, setIsWinner] = useState<boolean | null>(null)
+  // Details for UI: reason, move, winner, winnerName
+  const [gameEndDetails, setGameEndDetails] = useState<{
+    reason?: string
+    moveSan?: string
+    moveMaker?: string
+    winner?: string | null
+    winnerName?: string | null
+  }>({})
 
   // Timer management
   const timerRef = useRef<NodeJS.Timeout | null>(null)
@@ -219,7 +229,13 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const smallFontSize = isTablet ? 14 : isSmallScreen ? 11 : 12
 
   // Function to handle game ending
-  const handleGameEnd = (result: string, winner: string | null, endReason: string) => {
+  // Accepts extra details for UI
+  const handleGameEnd = (
+    result: string,
+    winner: string | null,
+    endReason: string,
+    details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null }
+  ) => {
     console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
 
     // Stop all timers
@@ -232,7 +248,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     let message = ""
 
     if (result === "checkmate") {
-      // FIXED: Use the actual winner from the game result, not playerColor
       if (winner === playerColor) {
         playerWon = true
         message = "🎉 VICTORY! 🎉\nCheckmate! You won the game!"
@@ -240,7 +255,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         playerWon = false
         message = "😔 DEFEAT 😔\nCheckmate! You lost the game."
       } else {
-        // Fallback if winner is not properly set
         playerWon = null
         message = "🏁 GAME OVER 🏁\nCheckmate occurred"
       }
@@ -267,6 +281,15 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     setGameEndMessage(message)
     setShowGameEndModal(true)
 
+    // Set details for UI
+    setGameEndDetails({
+      reason: endReason,
+      moveSan: details?.moveSan,
+      moveMaker: details?.moveMaker,
+      winner,
+      winnerName: details?.winnerName,
+    })
+
     // Disconnect socket after a short delay
     setTimeout(() => {
       if (socket) {
@@ -282,7 +305,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       if (onNavigateToMenu) {
         onNavigateToMenu()
       }
-    }, 5000) // Show message for 5 seconds
+      // Redirect to /choose after 5 seconds
+      router.replace('/choose')
+    }, 5000)
   }
 
   // Function to manually navigate to menu
@@ -563,8 +588,21 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
 
-        console.log("[MOVE] Calling handleGameEnd with winner:", winner)
-        handleGameEnd(result, winner, endReason)
+        // Print the reason, who made the move, and declare the winner
+        const lastMove = data.gameState.move || data.move
+        let moveMaker = lastMove?.color || "unknown"
+        let moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+        let winnerName = null
+        if (winner && data.gameState.players && data.gameState.players[winner]) {
+          winnerName = data.gameState.players[winner].username
+        }
+        console.log(
+          `[GAME ENDED] Reason: ${endReason}\n` +
+          `Move: ${moveSan} by ${moveMaker}\n` +
+          `Winner: ${winner}${winnerName ? ` (${winnerName})` : ""}`
+        )
+
+        handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
         return
       }
 
@@ -1228,9 +1266,31 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
               {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
             </Text>
             <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
-            <TouchableOpacity style={styles.menuButton} onPress={navigateToMenu}>
+            {/* Show extra details if available */}
+            {(gameEndDetails.reason || gameEndDetails.moveSan || gameEndDetails.winner) && (
+              <View style={{ marginBottom: 16, marginTop: -10 }}>
+                {gameEndDetails.reason && (
+                  <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
+                    Reason: {gameEndDetails.reason}
+                  </Text>
+                )}
+                {gameEndDetails.moveSan && (
+                  <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
+                    Move: {gameEndDetails.moveSan}
+                    {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ''}
+                  </Text>
+                )}
+                {gameEndDetails.winner && (
+                  <Text style={{ color: '#4ade80', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
+                    Winner: {gameEndDetails.winner}
+                    {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ''}
+                  </Text>
+                )}
+              </View>
+            )}
+            {/* <TouchableOpacity style={styles.menuButton} onPress={navigateToMenu}>
               <Text style={styles.menuButtonText}>Return to Menu</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </View>
       </Modal>
