@@ -397,6 +397,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     socket.on("game:timer", handleTimerUpdate)
     socket.on("game:end", handleGameEndEvent)
     socket.on("game:error", handleGameError)
+    socket.on("game:warning", handleGameWarning) // <-- Add this line
 
     return () => {
       socket.off("game:move", handleGameMove)
@@ -405,6 +406,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       socket.off("game:timer", handleTimerUpdate)
       socket.off("game:end", handleGameEndEvent)
       socket.off("game:error", handleGameError)
+      socket.off("game:warning", handleGameWarning) // <-- And this line
     }
   }, [socket, playerColor])
 
@@ -824,6 +826,13 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const handleGameError = (data: any) => {
     console.log("Game error:", data)
     Alert.alert("Error", data.message || data.error || "An error occurred")
+  }
+
+  // Handles the 'game:warning' event from the server
+  const handleGameWarning = (data: any) => {
+    // Show warning message, but do not interrupt the game
+    const message = data?.message || "Warning: Invalid move or rule violation."
+    Alert.alert("Warning", message)
   }
 
   // Emits a request for possible moves for a square

@@ -636,26 +636,35 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     )
   }, [gameState, userId])
 
+
+const handleGameWarning = (data: any) => {
+  // Show warning message, but do not interrupt the game
+  const message = data?.message || "Warning: Invalid move or rule violation."
+  Alert.alert("Warning", message)
+}
+
   useEffect(() => {
-    if (!socket) return
+  if (!socket) return
 
-    // Listen for game events
-    socket.on("game:move", handleGameMove)
-    socket.on("game:possibleMoves", handlePossibleMoves)
-    socket.on("game:gameState", handleGameStateUpdate)
-    socket.on("game:timer", handleTimerUpdate)
-    socket.on("game:end", handleGameEndEvent)
-    socket.on("game:error", handleGameError)
+  // Listen for game events
+  socket.on("game:move", handleGameMove)
+  socket.on("game:possibleMoves", handlePossibleMoves)
+  socket.on("game:gameState", handleGameStateUpdate)
+  socket.on("game:timer", handleTimerUpdate)
+  socket.on("game:end", handleGameEndEvent)
+  socket.on("game:error", handleGameError)
+  socket.on("game:warning", handleGameWarning) // <-- Add this line
 
-    return () => {
-      socket.off("game:move", handleGameMove)
-      socket.off("game:possibleMoves", handlePossibleMoves)
-      socket.off("game:gameState", handleGameStateUpdate)
-      socket.off("game:timer", handleTimerUpdate)
-      socket.off("game:end", handleGameEndEvent)
-      socket.off("game:error", handleGameError)
-    }
-  }, [socket, playerColor])
+  return () => {
+    socket.off("game:move", handleGameMove)
+    socket.off("game:possibleMoves", handlePossibleMoves)
+    socket.off("game:gameState", handleGameStateUpdate)
+    socket.off("game:timer", handleTimerUpdate)
+    socket.off("game:end", handleGameEndEvent)
+    socket.off("game:error", handleGameError)
+    socket.off("game:warning", handleGameWarning) // <-- And this line
+  }
+}, [socket, playerColor])
 
   // Improved timer effect with proper turn-based countdown
   useEffect(() => {

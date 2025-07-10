@@ -4,6 +4,7 @@ import { ActivityIndicator, Image, Text, View } from "react-native";
 import { Socket } from "socket.io-client";
 import { getSocket, getSocketInstance } from "../utils/socketManager";
 import ChessGame from "./ChessGame";
+import DecayChessGame from "./Decay";
 
 interface GameState {
   sessionId: string;
@@ -160,10 +161,16 @@ export default function MatchMaking() {
   // If match is found and game state is available, show the chess game
   if (isMatchFound && gameState && gameSocket) {
     return (
-      <ChessGame 
+      variant === 'classic' ? ( <ChessGame 
         initialGameState={gameState}
         userId={userId}
-      />
+      />) : (
+        <DecayChessGame 
+          initialGameState={gameState}
+          userId={userId}
+        />
+      )
+      
     );
   } else if (loading) {
     // Show loading spinner while waiting for match to be established
