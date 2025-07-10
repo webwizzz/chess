@@ -351,51 +351,45 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
     // Stop the decay timer
     stopDecayTimer(square, color)
-
-    // If this was a queen, start looking for the next major piece to decay
-    const piece = getPieceAt(square)
-    if (piece && isQueen(piece)) {
-      startNextMajorPieceDecay(color)
-    }
   }
 
   // Start decay timer for the next major piece when queen freezes
-  const startNextMajorPieceDecay = (color: "white" | "black") => {
-    // Find the next major piece that isn't frozen
-    const fen = gameState.board.fen || gameState.board.position
-    if (!fen) return
+  // const startNextMajorPieceDecay = (color: "white" | "black") => {
+  //   // Find the next major piece that isn't frozen
+  //   const fen = gameState.board.fen || gameState.board.position
+  //   if (!fen) return
 
-    const piecePlacement = fen.split(" ")[0]
-    const rows = piecePlacement.split("/")
+  //   const piecePlacement = fen.split(" ")[0]
+  //   const rows = piecePlacement.split("/")
 
-    for (let rankIndex = 0; rankIndex < 8; rankIndex++) {
-      const row = rows[rankIndex]
-      let col = 0
+  //   for (let rankIndex = 0; rankIndex < 8; rankIndex++) {
+  //     const row = rows[rankIndex]
+  //     let col = 0
 
-      for (let i = 0; i < row.length; i++) {
-        const c = row[i]
-        if (c >= "1" && c <= "8") {
-          col += Number.parseInt(c)
-        } else {
-          const square = `${FILES[col]}${RANKS[rankIndex]}`
-          const pieceColor = getPieceColor(c)
+  //     for (let i = 0; i < row.length; i++) {
+  //       const c = row[i]
+  //       if (c >= "1" && c <= "8") {
+  //         col += Number.parseInt(c)
+  //       } else {
+  //         const square = `${FILES[col]}${RANKS[rankIndex]}`
+  //         const pieceColor = getPieceColor(c)
 
-          if (
-            pieceColor === color &&
-            isMajorPiece(c) &&
-            !isQueen(c) &&
-            !frozenPieces[color].has(square) &&
-            !decayState[color][square]?.isActive
-          ) {
-            console.log(`[DECAY] Starting decay for next major piece: ${c} at ${square}`)
-            startDecayTimer(square, c)
-            return
-          }
-          col++
-        }
-      }
-    }
-  }
+  //         if (
+  //           pieceColor === color &&
+  //           isMajorPiece(c) &&
+  //           !isQueen(c) &&
+  //           !frozenPieces[color].has(square) &&
+  //           !decayState[color][square]?.isActive
+  //         ) {
+  //           console.log(`[DECAY] Starting decay for next major piece: ${c} at ${square}`)
+  //           startDecayTimer(square, c)
+  //           return
+  //         }
+  //         col++
+  //       }
+  //     }
+  //   }
+  // }
 
   // Move piece in decay state when a move is made
   const movePieceInDecayState = (from: string, to: string) => {
@@ -437,8 +431,11 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
     // Only run decay timers during the player's turn and if game is active
     if (gameState.status !== "active" || !isMyTurn) {
+      console.log("[DECAY] Pausing decay timers - not player's turn or game not active")
       return
     }
+
+    console.log("[DECAY] Starting decay timer countdown for", playerColor)
 
     decayTimerRef.current = setInterval(() => {
       setDecayState((prev) => {
@@ -453,6 +450,12 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           if (timer.isActive && timer.timeLeft > 0) {
             hasActiveTimers = true
             timer.timeLeft = Math.max(0, timer.timeLeft - 100)
+
+            // Log timer updates for debugging
+            if (timer.timeLeft % 1000 === 0) {
+              // Log every second
+              console.log(`[DECAY] ${square}: ${Math.floor(timer.timeLeft / 1000)}s remaining`)
+            }
 
             // Freeze piece if timer expires
             if (timer.timeLeft <= 0) {
@@ -470,6 +473,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     return () => {
       if (decayTimerRef.current) {
         clearInterval(decayTimerRef.current)
+        console.log("[DECAY] Cleared decay timer interval")
       }
     }
   }, [isMyTurn, playerColor, gameState.status])
@@ -636,35 +640,26 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     )
   }, [gameState, userId])
 
-
-const handleGameWarning = (data: any) => {
-  // Show warning message, but do not interrupt the game
-  const message = data?.message || "Warning: Invalid move or rule violation."
-  Alert.alert("Warning", message)
-}
-
   useEffect(() => {
-  if (!socket) return
+    if (!socket) return
 
-  // Listen for game events
-  socket.on("game:move", handleGameMove)
-  socket.on("game:possibleMoves", handlePossibleMoves)
-  socket.on("game:gameState", handleGameStateUpdate)
-  socket.on("game:timer", handleTimerUpdate)
-  socket.on("game:end", handleGameEndEvent)
-  socket.on("game:error", handleGameError)
-  socket.on("game:warning", handleGameWarning) // <-- Add this line
+    // Listen for game events
+    socket.on("game:move", handleGameMove)
+    socket.on("game:possibleMoves", handlePossibleMoves)
+    socket.on("game:gameState", handleGameStateUpdate)
+    socket.on("game:timer", handleTimerUpdate)
+    socket.on("game:end", handleGameEndEvent)
+    socket.on("game:error", handleGameError)
 
-  return () => {
-    socket.off("game:move", handleGameMove)
-    socket.off("game:possibleMoves", handlePossibleMoves)
-    socket.off("game:gameState", handleGameStateUpdate)
-    socket.off("game:timer", handleTimerUpdate)
-    socket.off("game:end", handleGameEndEvent)
-    socket.off("game:error", handleGameError)
-    socket.off("game:warning", handleGameWarning) // <-- And this line
-  }
-}, [socket, playerColor])
+    return () => {
+      socket.off("game:move", handleGameMove)
+      socket.off("game:possibleMoves", handlePossibleMoves)
+      socket.off("game:gameState", handleGameStateUpdate)
+      socket.off("game:timer", handleTimerUpdate)
+      socket.off("game:end", handleGameEndEvent)
+      socket.off("game:error", handleGameError)
+    }
+  }, [socket, playerColor])
 
   // Improved timer effect with proper turn-based countdown
   useEffect(() => {
@@ -780,19 +775,42 @@ const handleGameWarning = (data: any) => {
           // Move the piece in decay state
           movePieceInDecayState(data.move.from, data.move.to)
 
-          // Start decay timer if it's a queen or if it's the next major piece after queen froze
+          // Check if the moved piece had an active decay timer
+          const hadActiveTimer = decayState[pieceColor][data.move.from]?.isActive
+
+          // Start decay timer if it's a queen
           if (isQueen(movedPiece)) {
             startDecayTimer(data.move.to, movedPiece)
           } else {
-            // Check if this piece should start decaying (if queen is already frozen)
+            // For other major pieces, only start decay if queen is already frozen
             const hasQueenFrozen = Array.from(frozenPieces[pieceColor]).some((square) => {
               const piece = getPieceAt(square)
               return piece && isQueen(piece)
             })
 
+            // Only start decay timer if queen is frozen AND this piece doesn't already have an active timer
             if (hasQueenFrozen && !decayState[pieceColor][data.move.to]?.isActive) {
               startDecayTimer(data.move.to, movedPiece)
             }
+          }
+
+          // If the piece had an active decay timer, add 2 seconds to it
+          if (hadActiveTimer) {
+            setDecayState((prev) => {
+              const newState = { ...prev }
+              const colorState = { ...newState[pieceColor] }
+
+              if (colorState[data.move.to]) {
+                // Add 2 seconds (2000ms) to the timer
+                colorState[data.move.to].timeLeft += DECAY_TIME_INCREMENT
+                console.log(
+                  `[DECAY] Added 2 seconds to ${movedPiece} at ${data.move.to}. New time: ${colorState[data.move.to].timeLeft}ms`,
+                )
+              }
+
+              newState[pieceColor] = colorState
+              return newState
+            })
           }
         }
       }
