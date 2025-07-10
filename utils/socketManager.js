@@ -9,6 +9,7 @@ export const getSocket = (
   variant,
   subvariant
 ) => {
+  console.log("getSocket called with parameters:",  userId, connectionType, sessionId, variant, subvariant);
   if (!socketInstance || !socketInstance.connected) {
     console.log(userId, connectionType, sessionId);
 

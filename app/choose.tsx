@@ -11,18 +11,22 @@ export default function Choose() {
 
   const variants = [
     {
+      name: 'decay',
       title: "Decay Chess",
       description: "Pieces decay after a set number of moves. Adapt your strategy!",
     },
     {
+      name: 'sixpointer',
       title: "Six Pointer",
       description: "Each piece has a point value. Score 6 points to win!",
     },
     {
+      name: 'crazyhouse',
       title: "Crazyhouse with Timer",
       description: "Captured pieces return to your hand. Play fast!",
     },
     {
+      name: 'classic',
       title: "Classic",
       description: "The traditional chess game with no special rules.",
     }
@@ -53,6 +57,9 @@ export default function Choose() {
     if (variant === "classic") {
       router.replace({pathname: "/classictimecontrol", params: {userId}} as any);
       return;
+    } else if (variant === "crazyhouse") {
+      router.replace({pathname: "/crazytimecontrol", params: {userId}} as any);
+      return;
     }
 
     setSocketConnecting(true);
@@ -63,7 +70,7 @@ export default function Choose() {
     socketInstance.on("connect", () => {
       socketInstance.emit("queue:join", { userId, variant });
       setSocketConnecting(false);
-      router.replace({ pathname: "/matchmaking", params: { variant } });
+      router.replace({ pathname: "/matchmaking", params: { variant, userId } });
     });
 
     socketInstance.on("connect_error", () => {
@@ -115,7 +122,7 @@ export default function Choose() {
             elevation: 3,
           }}
           activeOpacity={0.85}
-          onPress={() => handleVariantSelect(variant.title.toLowerCase())}
+          onPress={() => handleVariantSelect(variant.name)}
           disabled={!userId || socketConnecting}
         >
           <Text
