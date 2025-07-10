@@ -178,31 +178,11 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   }>({})
 
   // Timer management
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
   const lastUpdateRef = useRef<number>(Date.now())
   const gameStartTimeRef = useRef<number | null>(null)
   const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
-  const navigationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Sixpointer state
-  const isSixPointer = gameState.timeControl?.type === "sixpointer"
-  // Use perMove if present, else fallback
-  const perMoveTime = (gameState.timeControl as any)?.perMove || 30000
-  const [sixPointerTimer, setSixPointerTimer] = useState(perMoveTime)
-  const [sixPointerMoves, setSixPointerMoves] = useState<{ white: number; black: number }>({ white: 0, black: 0 })
-  const [sixPointerPoints, setSixPointerPoints] = useState<{ white: number; black: number }>({ white: 0, black: 0 })
-  const [sixPointerMovesLeft, setSixPointerMovesLeft] = useState<{ white: number; black: number }>({
-    white: 6,
-    black: 6,
-  })
-  const sixPointerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Decay variant state
-  const isDecay = gameState.variantName?.toLowerCase().includes("decay") || gameState.timeControl?.type === "decay"
-  const [decayTimers, setDecayTimers] = useState<{ white: any; black: any }>({ white: {}, black: {} })
-  const [localDecayTimers, setLocalDecayTimers] = useState<{ white: any; black: any }>({ white: {}, black: {} })
-  const [frozenPieces, setFrozenPieces] = useState<{ white: string[]; black: string[] }>({ white: [], black: [] })
-  const decayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Timer sync state - improved timer management
   function safeTimerValue(val: any): number {
@@ -254,26 +234,19 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     result: string,
     winner: string | null,
     endReason: string,
-    details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null },
+    details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null }
   ) => {
     console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
+
     // Stop all timers
     if (timerRef.current) {
       clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    if (sixPointerTimerRef.current) {
-      clearInterval(sixPointerTimerRef.current)
-      sixPointerTimerRef.current = null
-    }
-    if (decayTimerRef.current) {
-      clearInterval(decayTimerRef.current)
-      decayTimerRef.current = null
     }
 
     // Determine if current player won
     let playerWon: boolean | null = null
     let message = ""
+
     if (result === "checkmate") {
       if (winner === playerColor) {
         playerWon = true
@@ -333,7 +306,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         onNavigateToMenu()
       }
       // Redirect to /choose after 5 seconds
-      router.replace("/choose")
+      router.replace('/choose')
     }, 5000)
   }
 
@@ -359,7 +332,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       setSocket(gameSocket)
       console.log("Connected to game socket")
     }
-
     if (!gameSocket) {
       console.error("Failed to connect to game socket")
       Alert.alert("Connection Error", "Failed to connect to game socket. Please try again.")
@@ -376,6 +348,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     // Check if this is the first move based on move history
     const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
     isFirstMoveRef.current = moveCount === 0
+
     console.log("[INIT] Move count:", moveCount, "Is first move:", isFirstMoveRef.current)
 
     // Initialize game start time
@@ -386,12 +359,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current)
-      }
-      if (sixPointerTimerRef.current) {
-        clearInterval(sixPointerTimerRef.current)
-      }
-      if (decayTimerRef.current) {
-        clearInterval(decayTimerRef.current)
       }
       if (navigationTimeoutRef.current) {
         clearTimeout(navigationTimeoutRef.current)
@@ -406,7 +373,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     setPlayerColor(safePlayerColor)
     setBoardFlipped(safePlayerColor === "black")
     setIsMyTurn(gameState.board.activeColor === safePlayerColor)
-
     console.log(
       "[DEBUG] userId:",
       userId,
@@ -431,7 +397,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     socket.on("game:timer", handleTimerUpdate)
     socket.on("game:end", handleGameEndEvent)
     socket.on("game:error", handleGameError)
-    socket.on("game:warning", handleGameWarning) // <-- Add this line
 
     return () => {
       socket.off("game:move", handleGameMove)
@@ -440,331 +405,127 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       socket.off("game:timer", handleTimerUpdate)
       socket.off("game:end", handleGameEndEvent)
       socket.off("game:error", handleGameError)
-      socket.off("game:warning", handleGameWarning) // <-- And this line
     }
   }, [socket, playerColor])
 
-  // FIXED: Decay timer effect - moved outside and properly structured
+  // Improved timer effect with proper turn-based countdown
   useEffect(() => {
-    if (!isDecay || gameState.status !== "active") {
-      if (decayTimerRef.current) {
-        clearInterval(decayTimerRef.current)
-        decayTimerRef.current = null
-      }
-      return
-    }
-
-    // Clear existing timer
-    if (decayTimerRef.current) {
-      clearInterval(decayTimerRef.current)
-    }
-
-    // Start decay timer countdown
-    decayTimerRef.current = setInterval(() => {
-      setLocalDecayTimers((prev) => {
-        const updated: any = { white: {}, black: {} }
-        let hasChanges = false
-        ;(["white", "black"] as const).forEach((color) => {
-          const timers = prev[color] || {}
-          updated[color] = {}
-
-          Object.entries(timers).forEach(([piece, timer]: [string, any]) => {
-            if (timer && timer.active && typeof timer.timeRemaining === "number" && timer.timeRemaining > 0) {
-              const newTime = Math.max(0, timer.timeRemaining - 100)
-              updated[color][piece] = { ...timer, timeRemaining: newTime }
-              if (newTime !== timer.timeRemaining) hasChanges = true
-            } else {
-              updated[color][piece] = timer
-            }
-          })
-        })
-
-        return hasChanges ? updated : prev
-      })
-    }, 100)
-
-    return () => {
-      if (decayTimerRef.current) {
-        clearInterval(decayTimerRef.current)
-        decayTimerRef.current = null
-      }
-    }
-  }, [isDecay, gameState.status])
-
-  // FIXED: Main timer effect with proper sixpointer logic
-  useEffect(() => {
-    // Clear existing timers
     if (timerRef.current) {
       clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    if (sixPointerTimerRef.current) {
-      clearInterval(sixPointerTimerRef.current)
-      sixPointerTimerRef.current = null
     }
 
     if (gameState.status !== "active" || gameState.gameState?.gameEnded) {
       return
     }
 
-    if (isSixPointer) {
-      // FIXED: Sixpointer timer logic - only run for active player whose turn it is
-      const isActivePlayerTurn = gameState.board.activeColor === playerColor
+    // Update server sync reference when game state changes
+    const now = Date.now()
 
-      if (isActivePlayerTurn && isMyTurn) {
-        // Reset timer for the active player
-        setSixPointerTimer(perMoveTime)
+    // Use the most recent timer values from gameState
+    const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
+    const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
 
-        sixPointerTimerRef.current = setInterval(() => {
-          setSixPointerTimer((prev: number) => {
-            if (prev <= 1000) {
-              if (sixPointerTimerRef.current) {
-                clearInterval(sixPointerTimerRef.current)
-                sixPointerTimerRef.current = null
-              }
-              // Penalty: -1 point, forfeit turn
-              const color = gameState.board.activeColor
-              setSixPointerPoints((pts) => ({ ...pts, [color]: pts[color] - 1 }))
-              setSixPointerMoves((moves) => ({ ...moves, [color]: moves[color] + 1 }))
-              // Optionally emit a timeout event to server here if needed
-              return 0
-            }
-            return prev - 1000
-          })
-        }, 1000)
-      }
-    } else {
-      // Regular timer logic
-      timerRef.current = setInterval(() => {
-        const now = Date.now()
-        const serverSync = lastServerSync.current
+    // Check if this is still the first move
+    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
+    const isFirstMove = moveCount === 0
 
-        setLocalTimers(() => {
-          let newWhite = serverSync.white
-          let newBlack = serverSync.black
-
-          // Only decrement time for the active player and only if it's not the first move
-          if (!serverSync.isFirstMove) {
-            if (serverSync.activeColor === "white") {
-              newWhite = Math.max(0, serverSync.white - (now - serverSync.timestamp))
-              newBlack = serverSync.black
-            } else if (serverSync.activeColor === "black") {
-              newBlack = Math.max(0, serverSync.black - (now - serverSync.timestamp))
-              newWhite = serverSync.white
-            }
-          }
-
-          // Check for timeout
-          if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
-            handleGameEnd("timeout", "black", "White ran out of time")
-            return { white: 0, black: newBlack }
-          }
-          if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
-            handleGameEnd("timeout", "white", "Black ran out of time")
-            return { white: newWhite, black: 0 }
-          }
-
-          return { white: newWhite, black: newBlack }
-        })
-      }, 100)
+    lastServerSync.current = {
+      white: currentWhiteTime,
+      black: currentBlackTime,
+      activeColor: gameState.board.activeColor,
+      timestamp: now,
+      turnStartTime: gameState.board.turnStartTimestamp || now,
+      isFirstMove: isFirstMove,
     }
+
+    console.log("[TIMER] Setting up timer for active color:", gameState.board.activeColor)
+    console.log("[TIMER] Move count:", moveCount, "Is first move:", isFirstMove)
+    console.log("[TIMER] Server sync values - White:", currentWhiteTime, "Black:", currentBlackTime)
+    console.log("[TIMER] Local timer values - White:", localTimers.white, "Black:", localTimers.black)
+
+    // Start local timer countdown
+    timerRef.current = setInterval(() => {
+      const now = Date.now()
+      const serverSync = lastServerSync.current
+
+      // Calculate elapsed time since the server sync
+      const elapsedSinceSync = now - serverSync.timestamp
+
+      setLocalTimers((prev) => {
+        let newWhite = serverSync.white
+        let newBlack = serverSync.black
+
+        // CRITICAL: Only countdown for the active player, and only if it's not the first move
+        if (!serverSync.isFirstMove) {
+          if (serverSync.activeColor === "white") {
+            newWhite = Math.max(0, serverSync.white - elapsedSinceSync)
+            newBlack = serverSync.black
+          } else if (serverSync.activeColor === "black") {
+            newBlack = Math.max(0, serverSync.black - elapsedSinceSync)
+            newWhite = serverSync.white
+          }
+        } else {
+          newWhite = serverSync.white
+          newBlack = serverSync.black
+        }
+
+        // Check for timeout and end game automatically
+        if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("WHITE TIMEOUT DETECTED - Ending game")
+          handleGameEnd("timeout", "black", "White ran out of time")
+          return { white: 0, black: newBlack }
+        }
+
+        if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("BLACK TIMEOUT DETECTED - Ending game")
+          handleGameEnd("timeout", "white", "Black ran out of time")
+          return { white: newWhite, black: 0 }
+        }
+
+        return { white: newWhite, black: newBlack }
+      })
+    }, 100) // Update every 100ms for smooth countdown
 
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-      if (sixPointerTimerRef.current) {
-        clearInterval(sixPointerTimerRef.current)
-        sixPointerTimerRef.current = null
       }
     }
   }, [
-    isSixPointer,
     gameState.status,
     gameState.board.activeColor,
-    perMoveTime,
-    gameState.gameState?.gameEnded,
-    playerColor,
-    isMyTurn,
+    gameState.timeControl.timers.white,
+    gameState.timeControl.timers.black,
+    gameState.board.turnStartTimestamp,
+    gameState.moves?.length, // Add move count as dependency
+    gameState.board?.moveHistory?.length, // Add move history length as dependency
+    gameState.gameState?.gameEnded, // Add this dependency
   ])
 
   const handleGameMove = (data: any) => {
+    console.log("[MOVE] Move received:", data)
     if (data && data.gameState) {
       const now = Date.now()
 
-      // --- Decay variant: update decayTimers and frozenPieces from backend ---
-      if (isDecay) {
-        let timers = { white: {}, black: {} }
-        let frozen = { white: [], black: [] }
-
-        if (data.gameState.board?.decayTimers) timers = data.gameState.board.decayTimers
-        else if (data.gameState.gameState?.decayTimers) timers = data.gameState.gameState.decayTimers
-
-        if (data.gameState.board?.frozenPieces) frozen = data.gameState.board.frozenPieces
-        else if (data.gameState.gameState?.frozenPieces) frozen = data.gameState.gameState.frozenPieces
-
-        setDecayTimers(timers)
-        // Deep clone decayTimers for local ticking, so we don't mutate backend state
-        setLocalDecayTimers(JSON.parse(JSON.stringify(timers)))
-        setFrozenPieces(frozen)
-
-        // --- Main timer increment logic for decay variant ---
-        // Only increment if not sixpointer, and only for the player who just moved
-        if (!isSixPointer) {
-          // Determine who just moved (opposite of activeColor)
-          const prevColor = gameState.board.activeColor === "white" ? "black" : "white"
-          // Use the increment from timeControl
-          const increment = gameState.timeControl?.increment || 0
-
-          if (increment > 0) {
-            // Instead of directly incrementing localTimers, update lastServerSync and timers for smooth ticking
-            setLocalTimers((prev) => {
-              const updated = { ...prev }
-              updated[prevColor] = prev[prevColor] + increment * 1000
-
-              // Also update lastServerSync so the ticking interval uses the new value
-              lastServerSync.current = {
-                ...lastServerSync.current,
-                [prevColor]: updated[prevColor],
-                timestamp: Date.now(),
-              }
-
-              return updated
-            })
-          }
-        }
-      }
-
-      if (isSixPointer) {
-        // --- Sixpointer move logic ---
-        // Prefer backend values for moves left and points if available
-        let movesPlayed = { white: 0, black: 0 }
-        let movesLeft = { white: 6, black: 6 }
-        let points = { white: 0, black: 0 }
-
-        // Try to get from board or gameState
-        if (data.gameState.board?.movesPlayed) {
-          movesPlayed = data.gameState.board.movesPlayed
-        } else if (data.gameState.gameState?.movesPlayed) {
-          movesPlayed = data.gameState.gameState.movesPlayed
-        }
-
-        if (data.gameState.board?.moveLeft) {
-          movesLeft = data.gameState.board.moveLeft
-        } else if (data.gameState.gameState?.moveLeft) {
-          movesLeft = data.gameState.gameState.moveLeft
-        } else {
-          // fallback: maxMoves - movesPlayed
-          const maxMoves = data.gameState.board?.maxMoves || data.gameState.gameState?.maxMoves || 6
-          movesLeft = {
-            white: maxMoves - (movesPlayed.white || 0),
-            black: maxMoves - (movesPlayed.black || 0),
-          }
-        }
-
-        if (data.gameState.board?.points) {
-          points = data.gameState.board.points
-        } else if (data.gameState.gameState?.points) {
-          points = data.gameState.gameState.points
-        }
-
-        setSixPointerMoves(movesPlayed)
-        setSixPointerMovesLeft(movesLeft)
-        setSixPointerPoints(points)
-
-        // FIXED: Reset timer for next player - this will be handled by the timer effect
-        // The timer effect will check if it's the active player's turn and start the timer accordingly
-
-        // End game if both have 0 moves left
-        if (movesLeft.white <= 0 && movesLeft.black <= 0) {
-          let result = "draw"
-          let winner: string | null = null
-          if (points.white > points.black) {
-            result = "white wins"
-            winner = "white"
-          } else if (points.black > points.white) {
-            result = "black wins"
-            winner = "black"
-          }
-          handleGameEnd(result, winner, "6 moves completed")
-          return
-        }
-
-        // Also handle checkmate, stalemate, etc. as usual
-        if (
-          data.gameState.gameState?.gameEnded ||
-          data.gameState.gameState?.checkmate ||
-          data.gameState.status === "ended" ||
-          data.gameState.shouldNavigateToMenu
-        ) {
-          const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
-          let winner = data.gameState.gameState?.winner || data.gameState.winner
-
-          if (winner === "white" || winner === "black") {
-            // Winner is already the color
-          } else if (data.gameState.gameState?.winnerColor) {
-            winner = data.gameState.gameState.winnerColor
-          } else if (result === "checkmate") {
-            const checkmatedPlayer = data.gameState.board.activeColor
-            winner = checkmatedPlayer === "white" ? "black" : "white"
-          }
-
-          const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
-          const lastMove = data.gameState.move || data.move
-          const moveMaker = lastMove?.color || "unknown"
-          const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
-          let winnerName = null
-
-          if (winner && data.gameState.players && data.gameState.players[winner]) {
-            winnerName = data.gameState.players[winner].username
-          }
-
-          handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
-          return
-        }
-
-        // Update game state for UI
-        setGameState((prevState) => ({
-          ...prevState,
-          ...data.gameState,
-          board: {
-            ...prevState.board,
-            ...data.gameState.board,
-          },
-          timeControl: {
-            ...prevState.timeControl,
-            ...data.gameState.timeControl,
-            timers: {
-              white: perMoveTime,
-              black: perMoveTime,
-            },
-          },
-          moves: data.gameState.moves || [],
-          lastMove: data.gameState.lastMove,
-          moveCount: data.gameState.moveCount,
-        }))
-
-        setMoveHistory(data.gameState.moves || [])
-        setSelectedSquare(null)
-        setPossibleMoves([])
-
-        const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
-        const activeColor = data.gameState.board.activeColor
-        const newIsMyTurn = activeColor === userColor
-        setIsMyTurn(newIsMyTurn)
-
-        return
-      }
-
-      // --- Existing move logic for regular games ---
+      // Check if this was the first move
       const previousMoveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
       const newMoveCount = data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0
       const wasFirstMove = previousMoveCount === 0 && newMoveCount === 1
 
-      let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
-      let newBlackTime = safeTimerValue(gameState.timeControl.timers.black)
+      console.log(
+        "[MOVE] Previous move count:",
+        previousMoveCount,
+        "New move count:",
+        newMoveCount,
+        "Was first move:",
+        wasFirstMove,
+      )
 
+      // Extract timer values from the response - try multiple possible locations
+      let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white) // fallback to current
+      let newBlackTime = safeTimerValue(gameState.timeControl.timers.black) // fallback to current
+
+      // Try to get updated timer values from various possible locations in the response
       if (data.gameState.timeControl?.timers?.white !== undefined) {
         newWhiteTime = safeTimerValue(data.gameState.timeControl.timers.white)
       } else if (data.gameState.board?.whiteTime !== undefined) {
@@ -777,46 +538,69 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         newBlackTime = safeTimerValue(data.gameState.board.blackTime)
       }
 
+      console.log("[MOVE] Timer values from server - White:", newWhiteTime, "Black:", newBlackTime)
+      console.log("[MOVE] Previous local timers - White:", localTimers.white, "Black:", localTimers.black)
+
+      // For the first move, preserve the initial timer values and don't use the move response values
       if (wasFirstMove) {
+        console.log("[MOVE] First move detected - preserving initial timer values")
         newWhiteTime = localTimers.white
         newBlackTime = localTimers.black
       }
 
+      // CRITICAL: Update server sync reference with preserved values for first move
       lastServerSync.current = {
         white: newWhiteTime,
         black: newBlackTime,
-        activeColor: data.gameState.board.activeColor,
+        activeColor: data.gameState.board.activeColor, // This is whose turn it is NOW
         timestamp: now,
         turnStartTime: data.gameState.board.turnStartTimestamp || now,
-        isFirstMove: newMoveCount === 0,
+        isFirstMove: newMoveCount === 0, // Update first move status
       }
 
+      console.log("[MOVE] Updated server sync - Active color:", data.gameState.board.activeColor)
+
+      // Check if the game has ended due to checkmate or other conditions
       if (
         data.gameState.gameState?.gameEnded ||
         data.gameState.gameState?.checkmate ||
         data.gameState.status === "ended" ||
         data.gameState.shouldNavigateToMenu
       ) {
+        console.log("[MOVE] Game ended detected:", data.gameState.gameState)
+
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+
+        // FIXED: Get the actual winner color from the game state
         let winner = data.gameState.gameState?.winner || data.gameState.winner
 
+        // If winner is still a color string, use it directly
         if (winner === "white" || winner === "black") {
+          // Winner is already the color, use it as is
         } else if (data.gameState.gameState?.winnerColor) {
+          // Use winnerColor if available
           winner = data.gameState.gameState.winnerColor
         } else if (result === "checkmate") {
+          // Fallback: determine winner from active color (the player who got checkmated loses)
           const checkmatedPlayer = data.gameState.board.activeColor
           winner = checkmatedPlayer === "white" ? "black" : "white"
         }
 
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
-        const lastMove = data.gameState.move || data.move
-        const moveMaker = lastMove?.color || "unknown"
-        const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
-        let winnerName = null
 
+        // Print the reason, who made the move, and declare the winner
+        const lastMove = data.gameState.move || data.move
+        let moveMaker = lastMove?.color || "unknown"
+        let moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+        let winnerName = null
         if (winner && data.gameState.players && data.gameState.players[winner]) {
           winnerName = data.gameState.players[winner].username
         }
+        console.log(
+          `[GAME ENDED] Reason: ${endReason}\n` +
+          `Move: ${moveSan} by ${moveMaker}\n` +
+          `Winner: ${winner}${winnerName ? ` (${winnerName})` : ""}`
+        )
 
         handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
         return
@@ -842,19 +626,32 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         moveCount: data.gameState.moveCount,
       }))
 
+      // Update local timers with preserved values
       setLocalTimers({
         white: newWhiteTime,
         black: newBlackTime,
       })
 
+      console.log("[MOVE] Updated local timers to - White:", newWhiteTime, "Black:", newBlackTime)
+
       setMoveHistory(data.gameState.moves || [])
       setSelectedSquare(null)
       setPossibleMoves([])
 
+      // Use the updated activeColor from the new gameState
       const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
       const activeColor = data.gameState.board.activeColor
       const newIsMyTurn = activeColor === userColor
       setIsMyTurn(newIsMyTurn)
+
+      console.log(
+        "[MOVE] Turn update - Active color:",
+        activeColor,
+        "User color:",
+        userColor,
+        "Is my turn:",
+        newIsMyTurn,
+      )
     }
   }
 
@@ -862,7 +659,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const handlePossibleMoves = (data: { square: string; moves: any[] }) => {
     console.log("Possible moves (raw):", data.moves)
     let moves: string[] = []
-
     if (Array.isArray(data.moves) && data.moves.length > 0) {
       if (typeof data.moves[0] === "object" && data.moves[0].to) {
         moves = data.moves.map((m: any) => m.to)
@@ -872,7 +668,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         moves = data.moves
       }
     }
-
     console.log("Possible moves (dest squares):", moves)
     setPossibleMoves(moves)
   }
@@ -881,23 +676,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const handleGameStateUpdate = (data: any) => {
     console.log("Game state update:", data)
     if (data && data.gameState) {
-      // --- Decay variant: update decayTimers and frozenPieces from backend ---
-      if (isDecay) {
-        let timers = { white: {}, black: {} }
-        let frozen = { white: [], black: [] }
-
-        if (data.gameState.board?.decayTimers) timers = data.gameState.board.decayTimers
-        else if (data.gameState.gameState?.decayTimers) timers = data.gameState.gameState.decayTimers
-
-        if (data.gameState.board?.frozenPieces) frozen = data.gameState.board.frozenPieces
-        else if (data.gameState.gameState?.frozenPieces) frozen = data.gameState.gameState.frozenPieces
-
-        setDecayTimers(timers)
-        // Deep clone decayTimers for local ticking, so we don't mutate backend state
-        setLocalDecayTimers(JSON.parse(JSON.stringify(timers)))
-        setFrozenPieces(frozen)
-      }
-
       // Check for game ending
       if (
         data.gameState.gameState?.gameEnded ||
@@ -905,6 +683,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         data.gameState.shouldNavigateToMenu
       ) {
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+
         // FIXED: Get the actual winner color
         let winner = data.gameState.gameState?.winner || data.gameState.winner
         if (winner === "white" || winner === "black") {
@@ -912,7 +691,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         } else if (data.gameState.gameState?.winnerColor) {
           winner = data.gameState.gameState.winnerColor
         }
+
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
+
         handleGameEnd(result, winner, endReason)
         return
       }
@@ -939,13 +720,13 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
           },
         },
       }))
-
       setIsMyTurn(data.gameState.board.activeColor === playerColor)
     }
   }
 
   const handleGameTimerUpdate = (data: any) => {
     console.log("Timer update:", data)
+
     // Check for game ending in timer update
     if (data.gameEnded || data.shouldNavigateToMenu) {
       const result = data.endReason || "timeout"
@@ -1023,7 +804,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   // Handles the 'game:end' event from the server
   const handleGameEndEvent = (data: any) => {
     console.log("Game end event received:", data)
+
     const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
+
     // FIXED: Get the actual winner color
     let winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
     if (winner === "white" || winner === "black") {
@@ -1031,7 +814,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     } else if (data.gameState?.gameState?.winnerColor) {
       winner = data.gameState.gameState.winnerColor
     }
+
     const endReason = data.gameState?.gameState?.endReason || data.gameState?.endReason || data.endReason || result
+
     handleGameEnd(result, winner, endReason)
   }
 
@@ -1039,13 +824,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const handleGameError = (data: any) => {
     console.log("Game error:", data)
     Alert.alert("Error", data.message || data.error || "An error occurred")
-  }
-
-  // Handles the 'game:warning' event from the server
-  const handleGameWarning = (data: any) => {
-    // Show warning message, but do not interrupt the game
-    const message = data?.message || "Warning: Invalid move or rule violation."
-    Alert.alert("Warning", message)
   }
 
   // Emits a request for possible moves for a square
@@ -1082,7 +860,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       move: { from: move.from, to: move.to, promotion: move.promotion },
       timestamp: Date.now(),
     })
-
     console.log("[DEBUG] Move emitted:", { from: move.from, to: move.to, promotion: move.promotion })
   }
 
@@ -1097,6 +874,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     if (selectedSquare && possibleMoves.includes(square)) {
       // Check if this move is a promotion
       const promotionOptions: string[] = []
+
       // Check for promotion moves (simplified logic)
       const piece = getPieceAt(selectedSquare)
       const isPromotion =
@@ -1164,7 +942,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         col++
       }
     }
-
     return null
   }
 
@@ -1187,6 +964,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   // Calculate material advantage
   const calculateMaterialAdvantage = () => {
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
+
     let whiteAdvantage = 0
     let blackAdvantage = 0
 
@@ -1204,6 +982,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const renderCapturedPieces = (color: "white" | "black") => {
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
     const pieces = capturedPieces[color] || []
+
     if (pieces.length === 0) return null
 
     // Group pieces by type and count them
@@ -1221,26 +1000,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
             {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
           </View>
         ))}
-      </View>
-    )
-  }
-
-  // Render Decay timers and frozen pieces for each player
-  const renderDecayInfo = (color: "white" | "black") => {
-    if (!isDecay) return null
-    const timers = localDecayTimers[color] || {}
-    const frozen = frozenPieces[color] || []
-
-    // Show timers for each decaying piece (usually Queen, or next major piece)
-    return (
-      <View style={{ marginTop: 4 }}>
-        {Object.entries(timers).map(([piece, timer]: [string, any]) => (
-          <Text key={piece} style={{ color: "#fbbf24", fontSize: 13 }}>
-            {piece}:{" "}
-            {timer && typeof timer.timeRemaining === "number" ? `${(timer.timeRemaining / 1000).toFixed(1)}s` : "0.0s"}
-          </Text>
-        ))}
-        {frozen.length > 0 && <Text style={{ color: "#ef4444", fontSize: 13 }}>Frozen: {frozen.join(", ")}</Text>}
       </View>
     )
   }
@@ -1297,6 +1056,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
             {file}
           </Text>
         )}
+
         {piece && (
           <Text
             style={[
@@ -1368,22 +1128,13 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       )
     }
 
-    // Use localTimers for smooth UI countdown, but sixPointerTimer for sixpointer
-    const timer = isSixPointer
-      ? gameState.board.activeColor === color && isMyTurn && color === playerColor
-        ? sixPointerTimer
-        : perMoveTime
-      : safeTimerValue(localTimers[color])
+    // Use localTimers for smooth UI countdown
+    const timer = safeTimerValue(localTimers[color])
     const isActive = gameState.board.activeColor === color && gameState.status === "active"
     const isMe = playerColor === color
     const materialAdvantage = calculateMaterialAdvantage()
     const advantage = materialAdvantage[color] - materialAdvantage[color === "white" ? "black" : "white"]
 
-    // For sixpointer, show moves left and points (from backend)
-    const movesLeft = isSixPointer ? sixPointerMovesLeft[color] : null
-    const points = isSixPointer ? sixPointerPoints[color] : null
-
-    // Only show sixpointer UI if isSixPointer, not for decay
     return (
       <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
         <View style={styles.playerHeader}>
@@ -1401,19 +1152,16 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
               {isMe && <Text style={styles.youIndicator}>(You)</Text>}
             </View>
             <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
-            {isSixPointer && !isDecay && (
-              <Text style={styles.materialAdvantage}>
-                Points: {points} | Moves left: {movesLeft}
-              </Text>
-            )}
-            {!isSixPointer && advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
-            {renderDecayInfo(color)}
+            {advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
           </View>
+
           <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
             <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
           </View>
         </View>
+
         {renderCapturedPieces(color)}
+
         {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
       </View>
     )
@@ -1424,6 +1172,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
     const moves = moveHistory
     const movePairs = []
+
     for (let i = 0; i < moves.length; i += 2) {
       movePairs.push({
         moveNumber: Math.floor(i / 2) + 1,
@@ -1521,24 +1270,27 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
             {(gameEndDetails.reason || gameEndDetails.moveSan || gameEndDetails.winner) && (
               <View style={{ marginBottom: 16, marginTop: -10 }}>
                 {gameEndDetails.reason && (
-                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
+                  <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
                     Reason: {gameEndDetails.reason}
                   </Text>
                 )}
                 {gameEndDetails.moveSan && (
-                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
+                  <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
                     Move: {gameEndDetails.moveSan}
-                    {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ""}
+                    {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ''}
                   </Text>
                 )}
                 {gameEndDetails.winner && (
-                  <Text style={{ color: "#4ade80", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
+                  <Text style={{ color: '#4ade80', fontSize: 16, textAlign: 'center', marginBottom: 2 }}>
                     Winner: {gameEndDetails.winner}
-                    {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ""}
+                    {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ''}
                   </Text>
                 )}
               </View>
             )}
+            {/* <TouchableOpacity style={styles.menuButton} onPress={navigateToMenu}>
+              <Text style={styles.menuButtonText}>Return to Menu</Text>
+            </TouchableOpacity> */}
           </View>
         </View>
       </Modal>
