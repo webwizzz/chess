@@ -321,8 +321,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     )
   }
 
-  // Stop decay timer for a piece
-  const stopDecayTimer = (square: string, color: "white" | "black") => {
+  // Pause decay timer for a piece (but don't remove it)
+  const pauseDecayTimer = (square: string, color: "white" | "black") => {
     setDecayState((prev) => {
       const newState = { ...prev }
       const colorState = { ...newState[color] }
@@ -330,7 +330,25 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       if (colorState[square]) {
         colorState[square] = {
           ...colorState[square],
-          isActive: false,
+          isActive: false, // Pause but don't remove
+        }
+      }
+
+      newState[color] = colorState
+      return newState
+    })
+  }
+
+  // Resume decay timer for a piece
+  const resumeDecayTimer = (square: string, color: "white" | "black") => {
+    setDecayState((prev) => {
+      const newState = { ...prev }
+      const colorState = { ...newState[color] }
+
+      if (colorState[square] && colorState[square].timeLeft > 0) {
+        colorState[square] = {
+          ...colorState[square],
+          isActive: true, // Resume the timer
         }
       }
 
@@ -349,8 +367,14 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       return newFrozen
     })
 
-    // Stop the decay timer
-    stopDecayTimer(square, color)
+    // Remove the decay timer only when piece is frozen (timer expired)
+    setDecayState((prev) => {
+      const newState = { ...prev }
+      const colorState = { ...newState[color] }
+      delete colorState[square] // Only remove when frozen
+      newState[color] = colorState
+      return newState
+    })
   }
 
   // Start decay timer for the next major piece when queen freezes
@@ -402,10 +426,14 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       const newState = { ...prev }
       const colorState = { ...newState[pieceColor] }
 
-      // If the piece being moved has a decay timer, move it to the new square
+      // If the piece being moved has a decay timer, move it to the new square and keep it active
       if (colorState[from]) {
-        colorState[to] = { ...colorState[from] }
+        colorState[to] = {
+          ...colorState[from],
+          isActive: true, // Ensure it remains active after moving
+        }
         delete colorState[from]
+        console.log(`[DECAY] Moved timer from ${from} to ${to} for ${piece}`)
       }
 
       newState[pieceColor] = colorState
@@ -429,43 +457,53 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       clearInterval(decayTimerRef.current)
     }
 
-    // Only run decay timers during the player's turn and if game is active
-    if (gameState.status !== "active" || !isMyTurn) {
-      console.log("[DECAY] Pausing decay timers - not player's turn or game not active")
+    // Always run the interval, but pause/resume timers based on turn
+    if (gameState.status !== "active") {
       return
     }
 
-    console.log("[DECAY] Starting decay timer countdown for", playerColor)
+    console.log("[DECAY] Setting up decay timer management")
 
     decayTimerRef.current = setInterval(() => {
       setDecayState((prev) => {
         const newState = { ...prev }
-        let hasActiveTimers = false
 
-        // Update decay timers for current player only
-        const colorState = { ...newState[playerColor] }
+        // Handle both players' timers
+        ;["white", "black"].forEach((color) => {
+          const colorState = { ...newState[color as "white" | "black"] }
+          const isPlayerTurn = gameState.board.activeColor === color
 
-        Object.keys(colorState).forEach((square) => {
-          const timer = colorState[square]
-          if (timer.isActive && timer.timeLeft > 0) {
-            hasActiveTimers = true
-            timer.timeLeft = Math.max(0, timer.timeLeft - 100)
+          Object.keys(colorState).forEach((square) => {
+            const timer = colorState[square]
+            if (timer && timer.timeLeft > 0) {
+              if (isPlayerTurn && timer.isActive) {
+                // Only countdown during player's turn and if active
+                timer.timeLeft = Math.max(0, timer.timeLeft - 100)
 
-            // Log timer updates for debugging
-            if (timer.timeLeft % 1000 === 0) {
-              // Log every second
-              console.log(`[DECAY] ${square}: ${Math.floor(timer.timeLeft / 1000)}s remaining`)
+                // Log timer updates for debugging
+                if (timer.timeLeft % 1000 === 0) {
+                  console.log(`[DECAY] ${color} ${square}: ${Math.floor(timer.timeLeft / 1000)}s remaining`)
+                }
+
+                // Freeze piece if timer expires
+                if (timer.timeLeft <= 0) {
+                  console.log(`[DECAY] Timer expired for piece at ${square}`)
+                  setTimeout(() => freezePiece(square, color as "white" | "black"), 0)
+                }
+              } else if (!isPlayerTurn) {
+                // Pause timer when it's not the player's turn
+                timer.isActive = false
+              } else if (isPlayerTurn && !timer.isActive && timer.timeLeft > 0) {
+                // Resume timer when it becomes the player's turn
+                timer.isActive = true
+                console.log(`[DECAY] Resumed timer for ${color} ${square}`)
+              }
             }
+          })
 
-            // Freeze piece if timer expires
-            if (timer.timeLeft <= 0) {
-              console.log(`[DECAY] Timer expired for piece at ${square}`)
-              setTimeout(() => freezePiece(square, playerColor), 0)
-            }
-          }
+          newState[color as "white" | "black"] = colorState
         })
 
-        newState[playerColor] = colorState
         return newState
       })
     }, 100) // Update every 100ms
@@ -476,7 +514,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         console.log("[DECAY] Cleared decay timer interval")
       }
     }
-  }, [isMyTurn, playerColor, gameState.status])
+  }, [gameState.status, gameState.board.activeColor])
 
   // Function to handle game ending
   const handleGameEnd = (
