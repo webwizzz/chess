@@ -968,7 +968,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         whiteTime = safeTimerValue(data.timers.white)
         blackTime = safeTimerValue(data.timers.black)
       } else if (typeof data.timers === "number" && typeof data.black === "number") {
-        whiteTime = safeTimerValue(data.timers)
+        whiteTime = safeTimerValue(data.white)
         blackTime = safeTimerValue(data.black)
       } else {
         whiteTime = safeTimerValue(data.white ?? data.timers?.white)
