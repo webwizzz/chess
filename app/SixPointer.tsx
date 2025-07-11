@@ -187,12 +187,12 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     finalPoints?: { white: number; black: number }
   }>({})
 
-  // Timer management
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
+
   const lastUpdateRef = useRef<number>(Date.now())
   const gameStartTimeRef = useRef<number | null>(null)
-  const isFirstMoveRef = useRef<boolean>(true)
-  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
+  const timerRef = useRef<any>(null)
+  const navigationTimeoutRef = useRef<any>(null)
 
   // Timer sync state
   function safeTimerValue(val: any): number {
@@ -760,8 +760,8 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     if (data.timers && typeof data.timers === "object") {
       whiteTime = safeTimerValue(data.timers.white)
       blackTime = safeTimerValue(data.timers.black)
-    } else if (typeof data.timers === "number" && typeof data.black === "number") {
-      whiteTime = safeTimerValue(data.timers)
+    } else if (typeof data.white === "number" && typeof data.black === "number") {
+      whiteTime = safeTimerValue(data.white)
       blackTime = safeTimerValue(data.black)
     } else {
       whiteTime = safeTimerValue(data.white ?? data.timers?.white)
@@ -819,13 +819,18 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
 
   const handleGameError = (data: any) => {
     console.log("[6PT] Game error:", data)
+    setGameState((prev) => ({ ...prev, gameState: prev.gameState || {} }))
     Alert.alert("Error", data.message || data.error || "An error occurred")
   }
 
   const handleGameWarning = (data: any) => {
     const message = data?.message || "Warning: Invalid move or rule violation."
+    console.log("[6PT] Game warning:", message)
+    setGameState((prev) => ({ ...prev, gameState: data.gameState }))
     Alert.alert("Warning", message)
   }
+
+  const lastActiveColorRef = useRef<"white" | "black" | null>(null);
 
   useEffect(() => {
     // Clear existing timers
@@ -843,11 +848,17 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     }
 
     if (isSixPointer) {
-      // FIXED: Sixpointer timer logic - only run for active player whose turn it is
-      const isActivePlayerTurn = gameState.board.activeColor === playerColor
-      if (isActivePlayerTurn && isMyTurn) {
-        // Reset timer for the active player
+      const isActivePlayerTurn = gameState.board.activeColor === playerColor && isMyTurn
+
+      // Only reset timer if the turn just switched to this player
+      if (isActivePlayerTurn && lastActiveColorRef.current !== playerColor) {
         setSixPointerTimer(perMoveTime)
+        lastActiveColorRef.current = playerColor
+      } else if (!isActivePlayerTurn) {
+        lastActiveColorRef.current = gameState.board.activeColor
+      }
+
+      if (isActivePlayerTurn) {
         sixPointerTimerRef.current = setInterval(() => {
           setSixPointerTimer((prev: number) => {
             if (prev <= 1000) {

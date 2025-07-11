@@ -6,6 +6,7 @@ import { getSocket, getSocketInstance } from "../utils/socketManager";
 import ChessGame from "./ChessGame";
 import DecayChessGame from "./Decay";
 import SixPointChessGame from "./SixPointer";
+import CrazyHouse from "./crazyHouse";
 
 interface GameState {
   sessionId: string;
@@ -161,18 +162,43 @@ export default function MatchMaking() {
 
   // If match is found and game state is available, show the chess game
   if (isMatchFound && gameState && gameSocket) {
-    return (
-      variant === 'classic' ? ( <ChessGame 
-        initialGameState={gameState}
-        userId={userId}
-      />) : (
-        <SixPointChessGame 
-          initialGameState={gameState}
-          userId={userId}
-        />
-      )
-      
-    );
+    switch (variant) {
+      case "classic":
+        return (
+          <ChessGame
+            initialGameState={gameState}
+            userId={userId}
+          />
+        );
+      case "decay":
+        return (
+          <DecayChessGame
+            initialGameState={gameState}
+            userId={userId}
+          />
+        );
+      case "sixpointer":
+        return (
+          <SixPointChessGame
+            initialGameState={gameState}
+            userId={userId}
+          />
+        );
+      case "crazyhouse":
+        return (
+          <CrazyHouse
+            initialGameState={gameState}
+            userId={userId}
+            subvariant={subvariant} // Pass subvariant prop
+          />
+        )
+      default:
+        return (
+          <Text style={{ color: "#fff", fontSize: 20, textAlign: "center" }}>
+            Unsupported variant: {variant}
+          </Text>
+        );
+    }
   } else if (loading) {
     // Show loading spinner while waiting for match to be established
     return (
