@@ -178,11 +178,11 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   }>({})
 
   // Timer management
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
   const lastUpdateRef = useRef<number>(Date.now())
   const gameStartTimeRef = useRef<number | null>(null)
   const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
-  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const timerRef = useRef<any>(null)
+  const navigationTimeoutRef = useRef<any>(null)
 
   // Timer sync state - improved timer management
   function safeTimerValue(val: any): number {
@@ -227,6 +227,8 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const baseFontSize = isTablet ? 18 : isSmallScreen ? 14 : 16
   const titleFontSize = isTablet ? 24 : isSmallScreen ? 18 : 20
   const smallFontSize = isTablet ? 14 : isSmallScreen ? 11 : 12
+
+  
 
   // Function to handle game ending
   // Accepts extra details for UI
