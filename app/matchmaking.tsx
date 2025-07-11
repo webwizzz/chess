@@ -5,6 +5,7 @@ import { Socket } from "socket.io-client";
 import { getSocket, getSocketInstance } from "../utils/socketManager";
 import ChessGame from "./ChessGame";
 import DecayChessGame from "./Decay";
+import SixPointChessGame from "./SixPointer";
 
 interface GameState {
   sessionId: string;
@@ -165,7 +166,7 @@ export default function MatchMaking() {
         initialGameState={gameState}
         userId={userId}
       />) : (
-        <DecayChessGame 
+        <SixPointChessGame 
           initialGameState={gameState}
           userId={userId}
         />
