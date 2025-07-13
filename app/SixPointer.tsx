@@ -202,7 +202,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     winnerName?: string | null
     finalPoints?: { white: number; black: number }
   }>({})
-
+  
   const lastUpdateRef = useRef<number>(Date.now())
   const gameStartTimeRef = useRef<number | null>(null)
   const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
@@ -833,6 +833,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
   }
 
   const lastActiveColorRef = useRef<"white" | "black" | null>(null)
+
   useEffect(() => {
     // Clear existing timers
     if (timerRef.current) {
