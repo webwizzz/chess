@@ -788,11 +788,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       isFirstMove: isFirstMove,
     }
 
-    // Update local timers immediately
-    setLocalTimers({
-      white: whiteTime,
-      black: blackTime,
-    })
     setGameState((prevState) => ({
       ...prevState,
       timeControl: {
@@ -1248,6 +1243,8 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
               {player.username} {isMe && <Text style={styles.youIndicator}>YOU</Text>}
             </Text>
             <Text style={styles.playerRating}>({player.rating})</Text>
+            {/* ADD THIS LINE to display captured pieces */}
+            {renderCapturedPieces(color)}
           </View>
         </View>
 
@@ -1851,6 +1848,31 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: "#fff",
     fontSize: 16,
+    fontWeight: "bold",
+  },
+  capturedPieces: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    minHeight: 30, // Ensure some height even if no pieces
+  },
+  capturedPieceGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  capturedPiece: {
+    fontSize: 30, // Adjust size as needed
+    color: "#fff", // White color for captured pieces
+    marginRight: 2,
+  },
+  capturedCount: {
+    fontSize: 12,
+    color: "#999", // Lighter color for count
     fontWeight: "bold",
   },
 })
