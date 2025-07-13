@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../utils/socketManager"
-import GameControls from "./GameControls"
+// Removed GameControls import as it's no longer needed
 
 // Types
 interface Player {
@@ -156,6 +156,22 @@ const PIECE_VALUES = {
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
 
+const screenWidth = Dimensions.get("window").width
+const screenHeight = Dimensions.get("window").height
+const boardSize = screenWidth
+const squareSize = boardSize / 8
+
+const fontSizes = {
+  timer: 20,
+  piece: Math.min(squareSize * 0.7, 32),
+  username: 16,
+  rating: 14,
+  coordinates: 12,
+  points: 24, // For the large point circle
+  movesLeft: 12, // For the "moves left" text (general label)
+  moveNumberInBox: 10, // New: For the number inside the move boxes
+}
+
 export default function SixPointerChessGame({ initialGameState, userId, onNavigateToMenu }: SixPointerChessGameProps) {
   const router = useRouter()
   const [gameState, setGameState] = useState<GameState>(initialGameState)
@@ -186,8 +202,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     winnerName?: string | null
     finalPoints?: { white: number; black: number }
   }>({})
-
-
+  
   const lastUpdateRef = useRef<number>(Date.now())
   const gameStartTimeRef = useRef<number | null>(null)
   const isFirstMoveRef = useRef<boolean>(true) // Track if this is the first move
@@ -221,21 +236,9 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     isFirstMove: true,
   })
 
-  const screenWidth = Dimensions.get("window").width
-  const screenHeight = Dimensions.get("window").height
-  const isTablet = Math.min(screenWidth, screenHeight) > 600
-  const isSmallScreen = Math.min(screenWidth, screenHeight) < 400
+  // Chess.com style board sizing - full width
 
-  // Calculate responsive sizes
-  const containerPadding = isTablet ? 24 : isSmallScreen ? 12 : 16
-  const boardSize = Math.min(screenWidth - containerPadding * 2, screenHeight * 0.5, isTablet ? 500 : 380)
-  const squareSize = boardSize / 8
-  const minTouchTarget = 44
-
-  // Responsive text sizes
-  const baseFontSize = isTablet ? 18 : isSmallScreen ? 14 : 16
-  const titleFontSize = isTablet ? 24 : isSmallScreen ? 18 : 20
-  const smallFontSize = isTablet ? 14 : isSmallScreen ? 11 : 12
+  // Chess.com style responsive values
 
   // Get 6PT specific values with defaults
   const getMovesPlayed = () => gameState.movesPlayed || gameState.gameState?.movesPlayed || { white: 0, black: 0 }
@@ -244,16 +247,11 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
 
   // Sixpointer state - FIXED detection
   const isSixPointer = gameState.timeControl?.type === "sixpointer"
+
   // Use perMove if present, else fallback
   const perMoveTime = (gameState.timeControl as any)?.perMove || 30000
-  const [sixPointerTimer, setSixPointerTimer] = useState(perMoveTime)
-  const [sixPointerMoves, setSixPointerMoves] = useState<{ white: number; black: number }>({ white: 0, black: 0 })
   const [sixPointerPoints, setSixPointerPoints] = useState<{ white: number; black: number }>({ white: 0, black: 0 })
-  const [sixPointerMovesLeft, setSixPointerMovesLeft] = useState<{ white: number; black: number }>({
-    white: 6,
-    black: 6,
-  })
-  const sixPointerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [sixPointerMoves, setSixPointerMoves] = useState<{ white: number; black: number }>({ white: 0, black: 0 })
 
   // Function to handle game ending
   const handleGameEnd = (
@@ -268,7 +266,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     },
   ) => {
     console.log("[6PT GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
-
     // Stop all timers
     if (timerRef.current) {
       clearInterval(timerRef.current)
@@ -495,7 +492,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
         }
 
         setSixPointerMoves(movesPlayed)
-        setSixPointerMovesLeft(movesLeft)
+
         setSixPointerPoints(points)
 
         // FIXED: Only end game if BOTH players have 0 moves left
@@ -509,7 +506,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
             result = "black wins"
             winner = "black"
           }
-          handleGameEnd(result, winner, "6 moves completed")
+          handleGameEnd(result, winner, "6 moves completed", { finalPoints: points })
           return
         }
 
@@ -522,6 +519,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
         ) {
           const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
           let winner = data.gameState.gameState?.winner || data.gameState.winner
+
           if (winner === "white" || winner === "black") {
             // Winner is already the color
           } else if (data.gameState.gameState?.winnerColor) {
@@ -530,15 +528,18 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
             const checkmatedPlayer = data.gameState.board.activeColor
             winner = checkmatedPlayer === "white" ? "black" : "white"
           }
+
           const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
           const lastMove = data.gameState.move || data.move
           const moveMaker = lastMove?.color || "unknown"
           const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+
           let winnerName = null
           if (winner && data.gameState.players && data.gameState.players[winner]) {
             winnerName = data.gameState.players[winner].username
           }
-          handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
+
+          handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName, finalPoints: points })
           return
         }
 
@@ -554,13 +555,16 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
             ...prevState.timeControl,
             ...data.gameState.timeControl,
             timers: {
-              white: perMoveTime,
-              black: perMoveTime,
+              white: safeTimerValue(data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime),
+              black: safeTimerValue(data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime),
             },
           },
           moves: data.gameState.moves || [],
           lastMove: data.gameState.lastMove,
           moveCount: data.gameState.moveCount,
+          // Explicitly update movesPlayed and points from the calculated values
+          movesPlayed: movesPlayed,
+          points: points,
         }))
 
         setMoveHistory(data.gameState.moves || [])
@@ -582,7 +586,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       // Extract timer values from the response
       let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
       let newBlackTime = safeTimerValue(gameState.timeControl.timers.black)
-
       if (data.gameState.timeControl?.timers?.white !== undefined) {
         newWhiteTime = safeTimerValue(data.gameState.timeControl.timers.white)
       } else if (data.gameState.board?.whiteTime !== undefined) {
@@ -614,6 +617,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       ) {
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
         let winner = data.gameState.gameState?.winner || data.gameState.winner
+
         if (winner === "white" || winner === "black") {
           // Winner is already the color
         } else if (data.gameState.gameState?.winnerColor) {
@@ -622,14 +626,17 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
           const checkmatedPlayer = data.gameState.board.activeColor
           winner = checkmatedPlayer === "white" ? "black" : "white"
         }
+
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
         const lastMove = data.gameState.move || data.move
         const moveMaker = lastMove?.color || "unknown"
         const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+
         let winnerName = null
         if (winner && data.gameState.players && data.gameState.players[winner]) {
           winnerName = data.gameState.players[winner].username
         }
+
         handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
         return
       }
@@ -697,14 +704,15 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       ) {
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
         let winner = data.gameState.gameState?.winner || data.gameState.winner
+
         if (winner === "white" || winner === "black") {
           // Winner is already the color
         } else if (data.gameState.gameState?.winnerColor) {
           winner = data.gameState.gameState.winnerColor
         }
+
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
         const finalPoints = data.gameState.gameState?.points || data.gameState.points || getPoints()
-
         handleGameEnd(result, winner, endReason, { finalPoints })
         return
       }
@@ -715,7 +723,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
         black: safeTimerValue(data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime),
         activeColor: data.gameState.board.activeColor,
         timestamp: Date.now(),
-        turnStartTime: data.gameState.board.turnStartTimestamp || Date.now(),
+        turnStartTime: Date.now(),
         isFirstMove: (data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0) === 0,
       }
 
@@ -736,14 +744,12 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
         maxMoves: data.gameState.maxMoves || prevState.maxMoves,
         variant: data.gameState.variant || prevState.variant,
       }))
-
       setIsMyTurn(data.gameState.board.activeColor === playerColor)
     }
   }
 
   const handleTimerUpdate = (data: any) => {
     console.log("[6PT] Timer update:", data)
-
     // Check for game ending in timer update
     if (data.gameEnded || data.shouldNavigateToMenu) {
       const result = data.endReason || "timeout"
@@ -756,7 +762,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     // Handle different timer update formats from server
     let whiteTime: number
     let blackTime: number
-
     if (data.timers && typeof data.timers === "object") {
       whiteTime = safeTimerValue(data.timers.white)
       blackTime = safeTimerValue(data.timers.black)
@@ -767,7 +772,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       whiteTime = safeTimerValue(data.white ?? data.timers?.white)
       blackTime = safeTimerValue(data.black ?? data.timers?.black)
     }
-
     console.log("[6PT TIMER UPDATE] Parsed values - White:", whiteTime, "Black:", blackTime)
 
     // Check if this is still the first move
@@ -789,7 +793,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       white: whiteTime,
       black: blackTime,
     })
-
     setGameState((prevState) => ({
       ...prevState,
       timeControl: {
@@ -813,7 +816,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     }
     const endReason = data.gameState?.gameState?.endReason || data.gameState?.endReason || data.endReason || result
     const finalPoints = data.gameState?.gameState?.points || data.gameState?.points || data.points || getPoints()
-
     handleGameEnd(result, winner, endReason, { finalPoints })
   }
 
@@ -830,7 +832,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     Alert.alert("Warning", message)
   }
 
-  const lastActiveColorRef = useRef<"white" | "black" | null>(null);
+  const lastActiveColorRef = useRef<"white" | "black" | null>(null)
 
   useEffect(() => {
     // Clear existing timers
@@ -838,106 +840,67 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       clearInterval(timerRef.current)
       timerRef.current = null
     }
-    if (sixPointerTimerRef.current) {
-      clearInterval(sixPointerTimerRef.current)
-      sixPointerTimerRef.current = null
-    }
 
     if (gameState.status !== "active" || gameState.gameState?.gameEnded) {
       return
     }
 
-    if (isSixPointer) {
-      const isActivePlayerTurn = gameState.board.activeColor === playerColor && isMyTurn
+    const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
+    const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
 
-      // Only reset timer if the turn just switched to this player
-      if (isActivePlayerTurn && lastActiveColorRef.current !== playerColor) {
-        setSixPointerTimer(perMoveTime)
-        lastActiveColorRef.current = playerColor
-      } else if (!isActivePlayerTurn) {
-        lastActiveColorRef.current = gameState.board.activeColor
-      }
-
-      if (isActivePlayerTurn) {
-        sixPointerTimerRef.current = setInterval(() => {
-          setSixPointerTimer((prev: number) => {
-            if (prev <= 1000) {
-              if (sixPointerTimerRef.current) {
-                clearInterval(sixPointerTimerRef.current)
-                sixPointerTimerRef.current = null
-              }
-              // Penalty: -1 point, forfeit turn
-              const color = gameState.board.activeColor
-              setSixPointerPoints((pts) => ({ ...pts, [color]: pts[color] - 1 }))
-              setSixPointerMoves((moves) => ({ ...moves, [color]: moves[color] + 1 }))
-              return 0
-            }
-            return prev - 1000
-          })
-        }, 1000)
-      }
-    } else {
-      // Regular timer logic
-      const now = Date.now()
-      const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
-      const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
-      const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
-      const isFirstMove = moveCount === 0
-
-      lastServerSync.current = {
-        white: currentWhiteTime,
-        black: currentBlackTime,
-        activeColor: gameState.board.activeColor,
-        timestamp: now,
-        turnStartTime: gameState.board.turnStartTimestamp || now,
-        isFirstMove: isFirstMove,
-      }
-
-      timerRef.current = setInterval(() => {
-        const now = Date.now()
-        const serverSync = lastServerSync.current
-        setLocalTimers(() => {
-          let newWhite = serverSync.white
-          let newBlack = serverSync.black
-
-          // Only decrement time for the active player and only if it's not the first move
-          if (!serverSync.isFirstMove) {
-            if (serverSync.activeColor === "white") {
-              newWhite = Math.max(0, serverSync.white - (now - serverSync.timestamp))
-              newBlack = serverSync.black
-            } else if (serverSync.activeColor === "black") {
-              newBlack = Math.max(0, serverSync.black - (now - serverSync.timestamp))
-              newWhite = serverSync.white
-            }
-          }
-
-          // Check for timeout
-          if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
-            handleGameEnd("timeout", "black", "White ran out of time")
-            return { white: 0, black: newBlack }
-          }
-          if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
-            handleGameEnd("timeout", "white", "Black ran out of time")
-            return { white: newWhite, black: 0 }
-          }
-
-          return { white: newWhite, black: newBlack }
-        })
-      }, 100)
+    // Update server sync reference when the effect runs due to gameState change
+    lastServerSync.current = {
+      white: currentWhiteTime,
+      black: currentBlackTime,
+      activeColor: gameState.board.activeColor,
+      timestamp: Date.now(),
+      turnStartTime: gameState.board.turnStartTimestamp || Date.now(),
+      isFirstMove: (gameState.moves?.length || gameState.board?.moveHistory?.length || 0) === 0,
     }
+
+    timerRef.current = setInterval(() => {
+      const now = Date.now()
+      const serverSync = lastServerSync.current // Snapshot from last server update
+
+      let newWhite = serverSync.white
+      let newBlack = serverSync.black
+
+      // Calculate time elapsed since the last server sync point
+      const timeSinceLastSync = now - serverSync.timestamp
+
+      // Only decrement the active player's time
+      if (serverSync.activeColor === "white") {
+        newWhite = Math.max(0, serverSync.white - timeSinceLastSync)
+      } else if (serverSync.activeColor === "black") {
+        newBlack = Math.max(0, serverSync.black - timeSinceLastSync)
+      }
+
+      // Update local timers
+      setLocalTimers({
+        white: newWhite,
+        black: newBlack,
+      })
+
+      // Check for timeout
+      if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
+        handleGameEnd("timeout", "black", "White ran out of time")
+        // Return the final state to prevent further decrement
+        return { white: 0, black: newBlack }
+      }
+      if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
+        handleGameEnd("timeout", "white", "Black ran out of time")
+        // Return the final state to prevent further decrement
+        return { white: newWhite, black: 0 }
+      }
+    }, 100) // Tick every 100ms for smoother display
 
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
       }
-      if (sixPointerTimerRef.current) {
-        clearInterval(sixPointerTimerRef.current)
-        sixPointerTimerRef.current = null
-      }
     }
   }, [
-    isSixPointer,
     gameState.status,
     gameState.board.activeColor,
     gameState.timeControl.timers.white,
@@ -945,73 +908,9 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     gameState.board.turnStartTimestamp,
     gameState.moves?.length,
     gameState.board?.moveHistory?.length,
-    perMoveTime,
     gameState.gameState?.gameEnded,
-    playerColor,
-    isMyTurn,
   ])
 
-  const renderPlayerInfo = (color: "white" | "black") => {
-    const player = gameState.players[color]
-    if (!player) {
-      return (
-        <View style={styles.playerInfoContainer}>
-          <Text style={styles.playerName}>Unknown Player</Text>
-        </View>
-      )
-    }
-
-    // Use localTimers for smooth UI countdown, but sixPointerTimer for sixpointer
-    const timer = isSixPointer
-      ? gameState.board.activeColor === color && isMyTurn && color === playerColor
-        ? sixPointerTimer
-        : perMoveTime
-      : safeTimerValue(localTimers[color])
-
-    const isActive = gameState.board.activeColor === color && gameState.status === "active"
-    const isMe = playerColor === color
-    const materialAdvantage = calculateMaterialAdvantage()
-    const advantage = materialAdvantage[color] - materialAdvantage[color === "white" ? "black" : "white"]
-
-    // For sixpointer, show moves left and points (from backend)
-    const movesLeft = isSixPointer ? sixPointerMovesLeft[color] : null
-    const points = isSixPointer ? sixPointerPoints[color] : null
-
-    return (
-      <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
-        <View style={styles.playerHeader}>
-          <View style={styles.playerDetails}>
-            <View style={styles.playerNameRow}>
-              <Text
-                style={[
-                  styles.playerColorIndicator,
-                  { color: color === "white" ? "#fff" : "#000", backgroundColor: color === "white" ? "#000" : "#fff" },
-                ]}
-              >
-                {color === "white" ? "♔" : "♚"}
-              </Text>
-              <Text style={[styles.playerName, isActive && styles.activePlayerName]}>{player.username}</Text>
-              {isMe && <Text style={styles.youIndicator}>(You)</Text>}
-            </View>
-            <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
-            {isSixPointer && (
-              <Text style={styles.materialAdvantage}>
-                Points: {points} | Moves left: {movesLeft}
-              </Text>
-            )}
-            {!isSixPointer && advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
-          </View>
-          <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
-            <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
-          </View>
-        </View>
-        {renderCapturedPieces(color)}
-        {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
-      </View>
-    )
-  }
-
-  // Rest of the component methods remain the same as classic chess
   const requestPossibleMoves = (square: string) => {
     if (!socket) return
     socket.emit("game:getPossibleMoves", {
@@ -1040,7 +939,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     const movesPlayed = getMovesPlayed()
     const maxMoves = getMaxMoves()
     const playerMovesUsed = movesPlayed[playerColor] || 0
-
     if (playerMovesUsed >= maxMoves) {
       Alert.alert("Move Limit Reached", `You have already used all ${maxMoves} moves!`)
       return
@@ -1082,6 +980,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       }
 
       makeMove({ from: selectedSquare, to: square })
+      setPromotionModal(null)
       setSelectedSquare(null)
       setPossibleMoves([])
       return
@@ -1155,21 +1054,19 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
     let whiteAdvantage = 0
     let blackAdvantage = 0
-
     capturedPieces.white.forEach((piece) => {
       whiteAdvantage += PIECE_VALUES[piece.toLowerCase() as keyof typeof PIECE_VALUES] || 0
     })
-
     capturedPieces.black.forEach((piece) => {
       blackAdvantage += PIECE_VALUES[piece.toUpperCase() as keyof typeof PIECE_VALUES] || 0
     })
-
     return { white: whiteAdvantage, black: blackAdvantage }
   }
 
   const renderCapturedPieces = (color: "white" | "black") => {
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
     const pieces = capturedPieces[color] || []
+
     if (pieces.length === 0) return null
 
     const pieceCounts: { [key: string]: number } = {}
@@ -1195,6 +1092,8 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     const isLight = (FILES.indexOf(file) + Number.parseInt(rank)) % 2 === 0
     const isSelected = selectedSquare === square
     const isPossibleMove = possibleMoves.includes(square)
+    const piece = getPieceAt(square)
+    const isCapture = isPossibleMove && piece && !isPieceOwnedByPlayer(piece, playerColor)
 
     // Use the last move from moveHistory if available
     let lastMoveObj = null
@@ -1208,13 +1107,10 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     ) {
       lastMoveObj = gameState.lastMove
     }
-
     let isLastMove = false
     if (lastMoveObj && lastMoveObj.from && lastMoveObj.to) {
       isLastMove = lastMoveObj.from === square || lastMoveObj.to === square
     }
-
-    const piece = getPieceAt(square)
 
     return (
       <TouchableOpacity
@@ -1224,30 +1120,21 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
           {
             width: squareSize,
             height: squareSize,
-            backgroundColor: isLight ? "#F0D9B5" : "#B58863",
-            borderWidth: isPossibleMove ? 3 : isSelected ? 3 : isLastMove ? 2 : 0,
-            borderColor: isPossibleMove ? "#4ade80" : isSelected ? "#60a5fa" : isLastMove ? "#fbbf24" : "transparent",
+            backgroundColor: isLight ? "#F0D9B5" : "#769656", // Exact Chess.com colors
           },
+          isLastMove && styles.lastMoveSquare,
+          isSelected && styles.selectedSquare,
+          isPossibleMove && !isCapture && styles.possibleMoveSquare,
+          isCapture && styles.captureMoveSquare,
         ]}
         onPress={() => handleSquarePress(square)}
       >
-        {/* Coordinate labels */}
-        {file === "a" && (
-          <Text style={[styles.coordinateLabel, styles.rankLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
-            {rank}
-          </Text>
-        )}
-        {rank === "1" && (
-          <Text style={[styles.coordinateLabel, styles.fileLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
-            {file}
-          </Text>
-        )}
         {piece && (
           <Text
             style={[
               styles.piece,
               {
-                fontSize: Math.min(squareSize * 0.7, isTablet ? 40 : isSmallScreen ? 24 : 32),
+                fontSize: fontSizes.piece,
               },
             ]}
           >
@@ -1260,42 +1147,30 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     )
   }
 
-  // Render game info with 6PT specific information
-  const renderGameInfo = () => {
-    const gs = gameState.gameState || {}
-    const movesPlayed = getMovesPlayed()
-    const points = getPoints()
-    const maxMoves = getMaxMoves()
-
-    // Check if game has ended
-    if (gameState.status === "ended" || gs.gameEnded) {
-      return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.gameOverText}>🏁 6PT Game Ended 🏁</Text>
-          <Text style={styles.pointsDisplay}>
-            Final Score: {points.white} - {points.black}
-          </Text>
-        </View>
-      )
-    }
-
-    // Show whose turn it is with 6PT specific info
-    const activePlayerName = gameState.players[gameState.board.activeColor]?.username || gameState.board.activeColor
-    const isMyTurnActive = gameState.board.activeColor === playerColor
-    const activePlayerMovesLeft = maxMoves - (movesPlayed[gameState.board.activeColor] || 0)
+  const renderCoordinates = () => {
+    const files = boardFlipped ? [...FILES].reverse() : FILES
+    const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
-      <View style={styles.gameStatusContainer}>
-        <Text style={[styles.turnIndicator, isMyTurnActive && styles.myTurnIndicator]}>
-          {isMyTurnActive ? "🎯 Your Turn" : `⏳ ${activePlayerName}'s Turn`}
-        </Text>
-        <Text style={styles.movesLeftIndicator}>
-          Moves left: {activePlayerMovesLeft}/{maxMoves}
-        </Text>
-        <Text style={styles.pointsDisplay}>
-          Score: {points.white} - {points.black}
-        </Text>
-      </View>
+      <>
+        {/* File coordinates (a-h) at bottom */}
+        <View style={styles.fileCoordinates}>
+          {files.map((file, index) => (
+            <View key={file} style={{ width: squareSize, alignItems: "center" }}>
+              <Text style={styles.coordinateText}>{file}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Rank coordinates (1-8) on right side */}
+        <View style={styles.rankCoordinates}>
+          {ranks.map((rank, index) => (
+            <View key={rank} style={{ height: squareSize, justifyContent: "center" }}>
+              <Text style={styles.coordinateText}>{rank}</Text>
+            </View>
+          ))}
+        </View>
+      </>
     )
   }
 
@@ -1305,12 +1180,81 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
 
     return (
       <View style={styles.boardContainer}>
-        <View style={styles.board}>
-          {ranks.map((rank) => (
-            <View key={rank} style={styles.row}>
-              {files.map((file) => renderSquare(file, rank))}
+        <View style={styles.boardWrapper}>
+          <View
+            style={[
+              styles.board,
+              {
+                width: boardSize,
+                height: boardSize,
+              },
+            ]}
+          >
+            {ranks.map((rank) => (
+              <View key={rank} style={styles.row}>
+                {files.map((file) => renderSquare(file, rank))}
+              </View>
+            ))}
+          </View>
+          {renderCoordinates()}
+        </View>
+      </View>
+    )
+  }
+
+  const renderMovesLeftIndicators = (color: "white" | "black") => {
+    const maxMoves = getMaxMoves()
+    const movesPlayedCount = getMovesPlayed()[color] || 0 // Number of moves made by this player
+    const indicators = []
+
+    for (let i = 0; i < maxMoves; i++) {
+      const isMoveMade = i < movesPlayedCount
+      const displayMoveNumber = isMoveMade ? (i + 1).toString() : "" // Display 1, 2, 3...
+
+      indicators.push(
+        <View key={i} style={[styles.moveSquare, isMoveMade ? styles.filledMoveSquare : styles.emptyMoveSquare]}>
+          <Text style={[styles.moveNumberInBox, isMoveMade ? styles.filledMoveNumberText : styles.emptyMoveNumberText]}>
+            {displayMoveNumber}
+          </Text>
+        </View>,
+      )
+    }
+    return <View style={styles.movesLeftContainer}>{indicators}</View>
+  }
+
+  const renderPlayerInfo = (color: "white" | "black", isTop: boolean) => {
+    const player = gameState.players[color]
+    if (!player) return null
+
+    const timer = safeTimerValue(localTimers[color])
+
+    const isActivePlayer = gameState.board.activeColor === color
+    const isMe = playerColor === color
+    const currentPoints = getPoints()[color]
+
+    return (
+      <View style={[styles.playerInfoBlock, isTop ? styles.topPlayerBlock : styles.bottomPlayerBlock]}>
+        <View style={styles.playerInfoLeft}>
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
             </View>
-          ))}
+            <View style={styles.pointsCircle}>
+              <Text style={styles.pointsText}>{currentPoints}</Text>
+            </View>
+          </View>
+          <View style={styles.playerDetails}>
+            <Text style={styles.playerName}>
+              {player.username} {isMe && <Text style={styles.youIndicator}>YOU</Text>}
+            </Text>
+            <Text style={styles.playerRating}>({player.rating})</Text>
+          </View>
+        </View>
+
+        <View style={styles.playerInfoRight}>
+          <View style={[styles.timerContainer, isActivePlayer && styles.activeTimer]}>
+            <Text style={[styles.timer, { fontSize: fontSizes.timer }]}>{formatTime(timer)}</Text>
+          </View>
         </View>
       </View>
     )
@@ -1334,7 +1278,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
         <View style={styles.modalOverlay}>
           <View style={styles.moveHistoryModal}>
             <View style={styles.moveHistoryHeader}>
-              <Text style={styles.moveHistoryTitle}>📜 6PT Move History</Text>
+              <Text style={styles.moveHistoryTitle}>Moves</Text>
               <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
@@ -1343,8 +1287,8 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
               {movePairs.map((pair, index) => (
                 <View key={index} style={styles.moveRow}>
                   <Text style={styles.moveNumber}>{pair.moveNumber}.</Text>
-                  <Text style={styles.moveText}>{pair.white}</Text>
                   <Text style={styles.moveText}>{pair.black}</Text>
+                  <Text style={styles.moveText}>{pair.white}</Text>
                 </View>
               ))}
             </ScrollView>
@@ -1358,36 +1302,59 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     setBoardFlipped(!boardFlipped)
   }
 
-  // Determine player positions based on color and board orientation
-  const topPlayerColor = boardFlipped ? playerColor : playerColor === "white" ? "black" : "white"
-  const bottomPlayerColor = boardFlipped ? (playerColor === "white" ? "black" : "white") : playerColor
+  const opponentColor = playerColor === "white" ? "black" : "white"
 
   return (
     <View style={styles.container}>
-      {/* Top Player */}
-      {renderPlayerInfo(topPlayerColor)}
+      {/* Top Player Info Block */}
+      {renderPlayerInfo(opponentColor, true)}
 
-      {/* Game Status */}
-      {renderGameInfo()}
+      {/* Top Moves Left Indicators */}
+      {isSixPointer && <View style={styles.movesLeftRowWrapperTop}>{renderMovesLeftIndicators(opponentColor)}</View>}
 
       {/* Chess Board */}
       {renderBoard()}
 
-      {/* Bottom Player */}
-      {renderPlayerInfo(bottomPlayerColor)}
+      {/* Bottom Moves Left Indicators */}
+      {isSixPointer && <View style={styles.movesLeftRowWrapperBottom}>{renderMovesLeftIndicators(playerColor)}</View>}
 
-      {/* Game Controls */}
-      <View style={styles.controlsContainer}>
-        <GameControls
-          socket={socket}
-          sessionId={gameState.sessionId}
-          gameStatus={gameState.status}
-          canResign={gameState.status === "active"}
-          canOfferDraw={gameState.status === "active"}
-          onFlipBoard={handleFlipBoard}
-        />
-        <TouchableOpacity style={styles.historyButton} onPress={() => setShowMoveHistory(true)}>
-          <Text style={styles.historyButtonText}>📜 History</Text>
+      {/* Bottom Player Info Block */}
+      {renderPlayerInfo(playerColor, false)}
+
+      {/* Bottom Control Bar */}
+      <View style={styles.bottomBar}>
+        <TouchableOpacity style={styles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
+          <Text style={styles.bottomBarIcon}>≡</Text>
+          <Text style={styles.bottomBarLabel}>Moves</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.bottomBarButton} onPress={handleFlipBoard}>
+          <Text style={styles.bottomBarIcon}>⟲</Text>
+          <Text style={styles.bottomBarLabel}>Flip</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.bottomBarButton}
+          onPress={() => {
+            if (socket && gameState.status === "active") {
+              socket.emit("game:resign")
+            }
+          }}
+        >
+          <Text style={styles.bottomBarIcon}>✕</Text>
+          <Text style={styles.bottomBarLabel}>Resign</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.bottomBarButton}
+          onPress={() => {
+            if (socket && gameState.status === "active") {
+              socket.emit("game:offerDraw")
+            }
+          }}
+        >
+          <Text style={styles.bottomBarIcon}>½</Text>
+          <Text style={styles.bottomBarLabel}>Draw</Text>
         </TouchableOpacity>
       </View>
 
@@ -1411,35 +1378,30 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
                 isWinner === false && styles.defeatTitle,
               ]}
             >
-              {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 6PT GAME OVER 🏁"}
+              {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
             </Text>
             <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
-
             {/* Show extra details if available */}
             {(gameEndDetails.reason ||
               gameEndDetails.moveSan ||
               gameEndDetails.winner ||
               gameEndDetails.finalPoints) && (
-              <View style={{ marginBottom: 16, marginTop: -10 }}>
-                {gameEndDetails.reason && (
-                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
-                    Reason: {gameEndDetails.reason}
-                  </Text>
-                )}
+              <View style={styles.gameEndDetailsContainer}>
+                {gameEndDetails.reason && <Text style={styles.gameEndDetailText}>Reason: {gameEndDetails.reason}</Text>}
                 {gameEndDetails.moveSan && (
-                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
+                  <Text style={styles.gameEndDetailText}>
                     Move: {gameEndDetails.moveSan}
                     {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ""}
                   </Text>
                 )}
                 {gameEndDetails.winner && (
-                  <Text style={{ color: "#4ade80", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
+                  <Text style={styles.gameEndDetailText}>
                     Winner: {gameEndDetails.winner}
                     {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ""}
                   </Text>
                 )}
                 {gameEndDetails.finalPoints && (
-                  <Text style={{ color: "#60a5fa", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
+                  <Text style={styles.gameEndDetailText}>
                     Final Score: {gameEndDetails.finalPoints.white} - {gameEndDetails.finalPoints.black}
                   </Text>
                 )}
@@ -1486,205 +1448,185 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#2c2c2c", // Chess.com dark background
+    justifyContent: "space-between", // Distribute content vertically
+    alignItems: "center",
+  },
+  playerInfoBlock: {
+    width: "100%",
+    backgroundColor: "#2c2c2c", // Match overall background
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "#3a3a3a", // Subtle separator
+  },
+  topPlayerBlock: {
+    paddingTop: 20, // Account for status bar
+  },
+  bottomPlayerBlock: {
+    borderTopWidth: 1,
+    borderBottomWidth: 0,
+    borderTopColor: "#3a3a3a",
+    paddingBottom: 20, // Account for bottom safe area
+  },
+  playerInfoLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  avatarContainer: {
+    position: "relative",
+    marginRight: 12,
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    backgroundColor: "#666",
+    borderRadius: 25,
     justifyContent: "center",
     alignItems: "center",
-    padding: 16,
-    minHeight: 300,
   },
-  playerInfoContainer: {
-    width: "100%",
-    maxWidth: 500,
-    backgroundColor: "#16213e",
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    borderWidth: 2,
-    borderColor: "#0f3460",
-    minHeight: 80,
+  avatarText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
   },
-  activePlayerContainer: {
-    borderColor: "#4ade80",
-    backgroundColor: "#1e3a2e",
-    shadowColor: "#4ade80",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  playerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  pointsCircle: {
+    position: "absolute",
+    bottom: -5,
+    right: -5,
+    backgroundColor: "#4a4a4a", // Darker gray for points circle
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: "center",
     alignItems: "center",
-    marginBottom: 8,
-    minHeight: 44,
+    borderWidth: 2,
+    borderColor: "#2c2c2c", // Match background
+  },
+  pointsText: {
+    color: "#fff",
+    fontSize: fontSizes.points, // Ensure this uses the correct font size for points
+    fontWeight: "bold",
   },
   playerDetails: {
     flex: 1,
-    marginRight: 12,
-  },
-  playerNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-    flexWrap: "wrap",
-  },
-  playerColorIndicator: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    minWidth: 35.2,
-    textAlign: "center",
   },
   playerName: {
-    color: "#e2e8f0",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginRight: 12,
-    flexShrink: 1,
-  },
-  activePlayerName: {
-    color: "#4ade80",
+    color: "#fff",
+    fontSize: fontSizes.username,
+    fontWeight: "500",
   },
   youIndicator: {
-    color: "#60a5fa",
-    fontSize: 14,
-    fontStyle: "italic",
+    color: "#90EE90", // Green for "YOU"
+    fontSize: fontSizes.rating,
+    fontWeight: "bold",
+    marginLeft: 5,
   },
   playerRating: {
-    color: "#94a3b8",
-    fontSize: 14,
-    marginBottom: 6,
+    color: "#999",
+    fontSize: fontSizes.rating,
   },
-  sixPTInfo: {
-    color: "#60a5fa",
-    fontSize: 14,
-    fontWeight: "bold",
-    marginBottom: 4,
-  },
-  materialAdvantage: {
-    color: "#4ade80",
-    fontSize: 14,
-    fontWeight: "bold",
+  playerInfoRight: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   timerContainer: {
-    backgroundColor: "#0f172a",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
+    backgroundColor: "#1a1a1a",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    minWidth: 70,
+    alignItems: "center",
     borderWidth: 1,
-    borderColor: "#334155",
-    minWidth: 120,
-    minHeight: 44,
+    borderColor: "#3a3a3a",
+  },
+  activeTimer: {
+    borderColor: "#90EE90", // Green border for active timer
+  },
+  timer: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontFamily: "monospace",
+  },
+  // New styles for positioning the moves left indicators
+  movesLeftRowWrapperTop: {
+    width: "100%",
+    alignItems: "flex-end", // Aligns the row of boxes to the right
+    paddingHorizontal: 16, // Matches player info padding
+    paddingBottom: 8, // Space between indicators and board
+  },
+  movesLeftRowWrapperBottom: {
+    width: "100%",
+    alignItems: "flex-end", // Aligns the row of boxes to the right
+    paddingHorizontal: 16, // Matches player info padding
+    paddingTop: 8, // Space between indicators and board
+  },
+  movesLeftContainer: {
+    flexDirection: "row",
+    // Removed justifyContent: "center" as alignment is handled by parent wrapper
+    paddingVertical: 4,
+    backgroundColor: "rgba(0,0,0,0.2)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+  },
+  moveSquare: {
+    width: 20, // Increased size for number
+    height: 20, // Increased size for number
+    borderRadius: 4, // Slightly larger border radius
+    marginHorizontal: 3, // Adjusted margin
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1, // Add border for definition
+    borderColor: "#666", // Default border color
   },
-  activeTimerContainer: {
-    backgroundColor: "#4ade80",
-    borderColor: "#4ade80",
+  filledMoveSquare: {
+    backgroundColor: "#90EE90", // Green for filled moves
+    borderColor: "#90EE90", // Green border for filled moves
   },
-  timerText: {
-    color: "#e2e8f0",
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
+  emptyMoveSquare: {
+    backgroundColor: "#4a4a4a", // Darker gray for empty moves
+    borderColor: "#666", // Gray border for empty moves
   },
-  activeTimerText: {
-    color: "#000",
-  },
-  capturedPieces: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: 8,
-    minHeight: 30,
-  },
-  capturedPieceGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginRight: 12,
-    marginBottom: 6,
-  },
-  capturedPiece: {
-    fontSize: 16,
-    color: "#94a3b8",
-  },
-  capturedCount: {
-    fontSize: 12,
-    color: "#60a5fa",
-    marginLeft: 2,
+  moveNumberInBox: {
+    fontSize: fontSizes.moveNumberInBox, // Use the new font size
     fontWeight: "bold",
   },
-  yourTurnIndicator: {
-    color: "#4ade80",
-    fontSize: 14,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginTop: 8,
+  filledMoveNumberText: {
+    color: "#000", // Black text for green boxes
   },
-  movesExhaustedIndicator: {
-    color: "#94a3b8",
-    fontSize: 14,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginTop: 8,
-  },
-  gameStatusContainer: {
-    alignItems: "center",
-    marginVertical: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: "#16213e",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#0f3460",
-    maxWidth: "90%",
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  turnIndicator: {
-    color: "#e2e8f0",
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  myTurnIndicator: {
-    color: "#4ade80",
-  },
-  movesLeftIndicator: {
-    color: "#60a5fa",
-    fontSize: 14,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  pointsDisplay: {
-    color: "#fbbf24",
-    fontSize: 14,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginTop: 4,
-  },
-  gameOverText: {
-    color: "#94a3b8",
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
+  emptyMoveNumberText: {
+    color: "#999", // Gray text for empty boxes
   },
   boardContainer: {
     alignItems: "center",
-    marginVertical: 16,
-    width: "100%",
+    justifyContent: "center",
+    // Removed flex: 1 and width: "100%" here as it's now managed by the main container's flex
+  },
+  boardWrapper: {
+    position: "relative",
   },
   board: {
-    borderWidth: 3,
-    borderColor: "#8b5a2b",
-    borderRadius: 8,
-    backgroundColor: "#8b5a2b",
-    padding: 6,
-    width: 388,
-    height: 388,
+    borderRadius: 0, // No border radius for full-width board
+  },
+  fileCoordinates: {
+    flexDirection: "row",
+    position: "absolute",
+    bottom: -20,
+    left: 0,
+  },
+  rankCoordinates: {
+    position: "absolute",
+    right: -20,
+    top: 0,
+  },
+  coordinateText: {
+    color: "#999",
+    fontSize: fontSizes.coordinates,
+    fontWeight: "500",
   },
   row: {
     flexDirection: "row",
@@ -1693,34 +1635,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     position: "relative",
-    minHeight: 35.2,
-    minWidth: 35.2,
   },
-  coordinateLabel: {
-    position: "absolute",
-    fontSize: 12,
-    fontWeight: "bold",
+  lastMoveSquare: {
+    backgroundColor: "#f7ec74", // Chess.com last move highlight
   },
-  rankLabel: {
-    top: 3,
-    left: 3,
+  selectedSquare: {
+    backgroundColor: "#f7ec74", // Same as last move for consistency
   },
-  fileLabel: {
-    bottom: 3,
-    right: 3,
+  possibleMoveSquare: {
+    backgroundColor: "rgba(255, 255, 0, 0.3)", // Subtle highlight for possible moves
+  },
+  captureMoveSquare: {
+    backgroundColor: "rgba(255, 0, 0, 0.3)", // Red tint for captures
   },
   piece: {
     fontWeight: "bold",
-    textShadowColor: "rgba(0,0,0,0.5)",
+    color: "#000",
+    textShadowColor: "rgba(255,255,255,0.3)",
     textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    textShadowRadius: 1,
   },
   possibleMoveDot: {
     position: "absolute",
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "#4ade80",
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
     opacity: 0.8,
   },
   captureIndicator: {
@@ -1732,32 +1672,37 @@ const styles = StyleSheet.create({
     borderLeftWidth: 16,
     borderTopWidth: 16,
     borderLeftColor: "transparent",
-    borderTopColor: "#ef4444",
+    borderTopColor: "rgba(255, 0, 0, 0.3)", // Red tint for captures
   },
-  controlsContainer: {
+  bottomBar: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    width: "100%",
-    maxWidth: 500,
-    marginTop: 16,
-    paddingHorizontal: 8,
-  },
-  historyButton: {
-    backgroundColor: "#16213e",
-    paddingHorizontal: 20,
+    backgroundColor: "#1a1a1a",
     paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#0f3460",
-    minHeight: 44,
-    justifyContent: "center",
+    paddingHorizontal: 16,
+    justifyContent: "space-around",
     alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "#333",
+    width: "100%",
   },
-  historyButtonText: {
-    color: "#e2e8f0",
-    fontSize: 16,
+  bottomBarButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    minWidth: 60,
+  },
+  bottomBarIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+    color: "#999", // Professional gray color that matches the theme
     fontWeight: "bold",
+  },
+  bottomBarLabel: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "500",
   },
   modalOverlay: {
     flex: 1,
@@ -1767,164 +1712,145 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   moveHistoryModal: {
-    backgroundColor: "#16213e",
+    backgroundColor: "#2c2c2c",
     borderRadius: 12,
-    width: "95%",
-    maxWidth: 500,
-    maxHeight: "80%",
-    borderWidth: 2,
-    borderColor: "#0f3460",
+    width: "90%",
+    maxWidth: 400,
+    maxHeight: "70%",
+    borderWidth: 1,
+    borderColor: "#555",
   },
   moveHistoryHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20,
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#0f3460",
-    minHeight: 64,
+    borderBottomColor: "#555",
   },
   moveHistoryTitle: {
-    color: "#e2e8f0",
-    fontSize: 20,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  closeButton: {
-    padding: 12,
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  closeButtonText: {
-    color: "#94a3b8",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  moveHistoryScroll: {
-    flex: 1,
-    padding: 20,
-  },
-  moveRow: {
-    flexDirection: "row",
-    marginBottom: 12,
-    paddingVertical: 6,
-    alignItems: "center",
-  },
-  moveNumber: {
-    color: "#94a3b8",
-    fontSize: 16,
-    width: 40,
-    fontWeight: "bold",
-  },
-  moveText: {
-    color: "#e2e8f0",
-    fontSize: 16,
-    width: 80,
-    marginHorizontal: 12,
-  },
-  gameEndModal: {
-    backgroundColor: "#16213e",
-    borderRadius: 16,
-    padding: 32,
-    alignItems: "center",
-    borderWidth: 3,
-    borderColor: "#0f3460",
-    maxWidth: "90%",
-    minWidth: 300,
-  },
-  victoryModal: {
-    borderColor: "#4ade80",
-    backgroundColor: "#1e3a2e",
-  },
-  defeatModal: {
-    borderColor: "#ef4444",
-    backgroundColor: "#3a1e1e",
-  },
-  gameEndTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 20,
-    color: "#e2e8f0",
-  },
-  victoryTitle: {
-    color: "#4ade80",
-  },
-  defeatTitle: {
-    color: "#ef4444",
-  },
-  gameEndMessage: {
-    fontSize: 18,
-    textAlign: "center",
-    marginBottom: 30,
-    color: "#e2e8f0",
-    lineHeight: 24,
-  },
-  menuButton: {
-    backgroundColor: "#4f46e5",
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 12,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  menuButtonText: {
     color: "#fff",
     fontSize: 18,
     fontWeight: "bold",
   },
-  promotionModal: {
-    backgroundColor: "#16213e",
-    borderRadius: 12,
+  closeButton: {
+    padding: 8,
+  },
+  closeButtonText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  moveHistoryScroll: {
+    flex: 1,
+    padding: 16,
+  },
+  moveRow: {
+    flexDirection: "row",
+    marginBottom: 8,
+    alignItems: "center",
+  },
+  moveNumber: {
+    color: "#999",
+    fontSize: 14,
+    width: 30,
+    fontWeight: "bold",
+  },
+  moveText: {
+    color: "#fff",
+    fontSize: 14,
+    width: 60,
+    marginHorizontal: 8,
+  },
+  gameEndModal: {
+    backgroundColor: "#2c2c2c",
+    borderRadius: 16,
     padding: 24,
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#0f3460",
+    borderWidth: 1,
+    borderColor: "#555",
     maxWidth: "90%",
   },
-  promotionTitle: {
-    color: "#e2e8f0",
-    fontSize: 20,
+  victoryModal: {
+    borderColor: "#90EE90", // Green for victory
+  },
+  defeatModal: {
+    borderColor: "#FF6B6B", // Red for defeat
+  },
+  gameEndTitle: {
+    fontSize: 24,
     fontWeight: "bold",
-    marginBottom: 24,
+    textAlign: "center",
+    marginBottom: 16,
+    color: "#fff",
+  },
+  victoryTitle: {
+    color: "#90EE90",
+  },
+  defeatTitle: {
+    color: "#FF6B6B",
+  },
+  gameEndMessage: {
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 20,
+    color: "#fff",
+    lineHeight: 22,
+  },
+  gameEndDetailsContainer: {
+    marginBottom: 16,
+  },
+  gameEndDetailText: {
+    color: "#999",
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  promotionModal: {
+    backgroundColor: "#2c2c2c",
+    borderRadius: 12,
+    padding: 20,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#555",
+  },
+  promotionTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 20,
     textAlign: "center",
   },
   promotionOptions: {
     flexDirection: "row",
     justifyContent: "center",
-    marginBottom: 24,
+    marginBottom: 20,
     flexWrap: "wrap",
   },
   promotionOption: {
-    margin: 12,
-    padding: 16,
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-    minWidth: 54,
-    minHeight: 54,
+    margin: 8,
+    padding: 12,
+    backgroundColor: "#F0D9B5",
+    borderRadius: 8,
+    minWidth: 50,
+    minHeight: 50,
     justifyContent: "center",
     alignItems: "center",
   },
   promotionPiece: {
-    fontSize: 32,
+    fontSize: 28,
     textAlign: "center",
+    color: "#000",
   },
   cancelButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    backgroundColor: "#374151",
-    borderRadius: 10,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "#666",
+    borderRadius: 8,
   },
   cancelButtonText: {
-    color: "#94a3b8",
-    fontSize: 18,
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
   },
 })
