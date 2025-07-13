@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../utils/socketManager"
-import GameControls from "./GameControls"
 
 // Types
 interface Player {
@@ -216,53 +215,19 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   // Get screen dimensions and calculate responsive values
   const screenWidth = Dimensions.get("window").width
   const screenHeight = Dimensions.get("window").height
-  const screenMin = Math.min(screenWidth, screenHeight)
-  const screenMax = Math.max(screenWidth, screenHeight)
 
-  // Enhanced responsive breakpoints
-  const isVerySmallScreen = screenMin < 350
-  const isSmallScreen = screenMin < 400
-  const isMediumScreen = screenMin >= 400 && screenMin < 600
-  const isLargeScreen = screenMin >= 600
-  const isVeryWideScreen = screenMax / screenMin > 2
-
-  // Dynamic sizing calculations
-  const getResponsiveValue = (verySmall: number, small: number, medium: number, large: number) => {
-    if (isVerySmallScreen) return verySmall
-    if (isSmallScreen) return small
-    if (isMediumScreen) return medium
-    return large
-  }
-
-  // Calculate responsive sizes
-  const containerPadding = getResponsiveValue(16, 20, 24, 32)
-  const availableWidth = screenWidth - containerPadding * 2
-  const availableHeight = screenHeight * (isVeryWideScreen ? 0.6 : 0.7)
-
-  // Board size calculation - ensure it fits and is centered
-  const maxBoardSize = Math.min(availableWidth, availableHeight, 500)
-  const minBoardSize = Math.max(280, screenMin * 0.75)
-  const boardSize = Math.max(minBoardSize, Math.min(maxBoardSize, availableWidth * 0.9))
+  // Chess.com style board sizing - full width
+  const boardSize = screenWidth
   const squareSize = boardSize / 8
 
-  // Avatar size based on screen
-  const avatarSize = getResponsiveValue(60, 70, 80, 90)
-
-  // Responsive text sizes
+  // Chess.com style responsive values
+  const avatarSize = 50
   const fontSizes = {
-    timer: getResponsiveValue(24, 28, 32, 36),
-    piece: Math.min(squareSize * 0.75, getResponsiveValue(24, 28, 32, 36)),
-    capturedPiece: getResponsiveValue(16, 18, 20, 22),
-    yourTurn: getResponsiveValue(10, 11, 12, 14), // New font size for "Your Turn" message
-  }
-
-  // Responsive spacing
-  const spacing = {
-    xs: getResponsiveValue(4, 6, 8, 10),
-    sm: getResponsiveValue(8, 10, 12, 16),
-    md: getResponsiveValue(12, 16, 20, 24),
-    lg: getResponsiveValue(16, 20, 24, 32),
-    xl: getResponsiveValue(20, 24, 32, 40),
+    timer: 20,
+    piece: Math.min(squareSize * 0.7, 32),
+    username: 16,
+    rating: 14,
+    coordinates: 12,
   }
 
   // Function to handle game ending
@@ -273,7 +238,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null },
   ) => {
     console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
-
     if (timerRef.current) {
       clearInterval(timerRef.current)
     }
@@ -314,7 +278,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     setIsWinner(playerWon)
     setGameEndMessage(message)
     setShowGameEndModal(true)
-
     setGameEndDetails({
       reason: endReason,
       moveSan: details?.moveSan,
@@ -446,7 +409,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     const now = Date.now()
     const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
     const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
-
     const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
     const isFirstMove = moveCount === 0
 
@@ -491,6 +453,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
           handleGameEnd("timeout", "black", "White ran out of time")
           return { white: 0, black: newBlack }
         }
+
         if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
           console.log("BLACK TIMEOUT DETECTED - Ending game")
           handleGameEnd("timeout", "white", "Black ran out of time")
@@ -577,7 +540,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       ) {
         console.log("[MOVE] Game ended detected:", data.gameState.gameState)
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
-
         let winner = data.gameState.gameState?.winner || data.gameState.winner
 
         if (winner === "white" || winner === "black") {
@@ -590,10 +552,10 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         }
 
         const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
-
         const lastMove = data.gameState.move || data.move
         const moveMaker = lastMove?.color || "unknown"
         const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+
         let winnerName = null
         if (winner && data.gameState.players && data.gameState.players[winner]) {
           winnerName = data.gameState.players[winner].username
@@ -635,6 +597,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       })
 
       console.log("[MOVE] Updated local timers to - White:", newWhiteTime, "Black:", newBlackTime)
+
       setMoveHistory(data.gameState.moves || [])
       setSelectedSquare(null)
       setPossibleMoves([])
@@ -658,6 +621,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const handlePossibleMoves = (data: { square: string; moves: any[] }) => {
     console.log("Possible moves (raw):", data.moves)
     let moves: string[] = []
+
     if (Array.isArray(data.moves) && data.moves.length > 0) {
       if (typeof data.moves[0] === "object" && data.moves[0].to) {
         moves = data.moves.map((m: any) => m.to)
@@ -667,6 +631,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         moves = data.moves
       }
     }
+
     console.log("Possible moves (dest squares):", moves)
     setPossibleMoves(moves)
   }
@@ -680,8 +645,8 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         data.gameState.shouldNavigateToMenu
       ) {
         const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
-
         let winner = data.gameState.gameState?.winner || data.gameState.winner
+
         if (winner === "white" || winner === "black") {
           // Winner is already the color
         } else if (data.gameState.gameState?.winnerColor) {
@@ -721,7 +686,6 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
   const handleGameTimerUpdate = (data: any) => {
     console.log("Timer update:", data)
-
     if (data.gameEnded || data.shouldNavigateToMenu) {
       const result = data.endReason || "timeout"
       const winner = data.winner
@@ -790,8 +754,8 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const handleGameEndEvent = (data: any) => {
     console.log("Game end event received:", data)
     const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
-
     let winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
+
     if (winner === "white" || winner === "black") {
       // Winner is already the color
     } else if (data.gameState?.gameState?.winnerColor) {
@@ -897,6 +861,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const getPieceAt = (square: string): string | null => {
     const fileIndex = FILES.indexOf(square[0])
     const rankIndex = RANKS.indexOf(square[1])
+
     if (fileIndex === -1 || rankIndex === -1) return null
 
     const fen = gameState.board.fen || gameState.board.position
@@ -904,10 +869,12 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
     const piecePlacement = fen.split(" ")[0]
     const rows = piecePlacement.split("/")
+
     if (rows.length !== 8) return null
 
     const row = rows[rankIndex]
     let col = 0
+
     for (let i = 0; i < row.length; i++) {
       const c = row[i]
       if (c >= "1" && c <= "8") {
@@ -919,6 +886,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         col++
       }
     }
+
     return null
   }
 
@@ -931,11 +899,11 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   }
 
   const formatTime = (milliseconds: number): string => {
-    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "00:00"
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0:00"
     const totalSeconds = Math.floor(milliseconds / 1000)
     const minutes = Math.floor(totalSeconds / 60)
     const seconds = totalSeconds % 60
-    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`
   }
 
   const calculateMaterialAdvantage = () => {
@@ -957,6 +925,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const renderCapturedPieces = (color: "white" | "black") => {
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
     const pieces = capturedPieces[color] || []
+
     if (pieces.length === 0) return null
 
     const pieceCounts: { [key: string]: number } = {}
@@ -969,7 +938,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       <View style={styles.capturedPieces}>
         {Object.entries(pieceCounts).map(([piece, count]) => (
           <View key={piece} style={styles.capturedPieceGroup}>
-            <Text style={[styles.capturedPiece, { fontSize: fontSizes.capturedPiece }]}>
+            <Text style={[styles.capturedPiece, { fontSize: fontSizes.coordinates }]}>
               {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
             </Text>
             {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
@@ -1012,7 +981,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
           {
             width: squareSize,
             height: squareSize,
-            backgroundColor: isLight ? "#F5DEB3" : "#D2B48C",
+            backgroundColor: isLight ? "#F0D9B5" : "#769656", // Exact Chess.com colors
           },
           isLastMove && styles.lastMoveSquare,
           isSelected && styles.selectedSquare,
@@ -1038,26 +1007,56 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     )
   }
 
+  const renderCoordinates = () => {
+    const files = boardFlipped ? [...FILES].reverse() : FILES
+    const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
+
+    return (
+      <>
+        {/* File coordinates (a-h) at bottom */}
+        <View style={styles.fileCoordinates}>
+          {files.map((file, index) => (
+            <View key={file} style={{ width: squareSize, alignItems: "center" }}>
+              <Text style={styles.coordinateText}>{file}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Rank coordinates (1-8) on right side */}
+        <View style={styles.rankCoordinates}>
+          {ranks.map((rank, index) => (
+            <View key={rank} style={{ height: squareSize, justifyContent: "center" }}>
+              <Text style={styles.coordinateText}>{rank}</Text>
+            </View>
+          ))}
+        </View>
+      </>
+    )
+  }
+
   const renderBoard = () => {
     const files = boardFlipped ? [...FILES].reverse() : FILES
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
       <View style={styles.boardContainer}>
-        <View
-          style={[
-            styles.board,
-            {
-              width: boardSize,
-              height: boardSize,
-            },
-          ]}
-        >
-          {ranks.map((rank) => (
-            <View key={rank} style={styles.row}>
-              {files.map((file) => renderSquare(file, rank))}
-            </View>
-          ))}
+        <View style={styles.boardWrapper}>
+          <View
+            style={[
+              styles.board,
+              {
+                width: boardSize,
+                height: boardSize,
+              },
+            ]}
+          >
+            {ranks.map((rank) => (
+              <View key={rank} style={styles.row}>
+                {files.map((file) => renderSquare(file, rank))}
+              </View>
+            ))}
+          </View>
+          {renderCoordinates()}
         </View>
       </View>
     )
@@ -1072,37 +1071,21 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     const isActivePlayer = gameState.board.activeColor === color
 
     return (
-      <View style={[styles.playerContainer, styles.playerBorder, isTop ? styles.topPlayer : styles.bottomPlayer]}>
-        {/* Player Info (Avatar, Name, Your Turn Message) */}
-        <View style={isTop ? styles.playerInfoBlockLeft : styles.playerInfoBlockRight}>
-          <View style={styles.playerInfoGroup}>
-            {" "}
-            {/* This is the row for avatar and name */}
-            {isTop ? (
-              <>
-                <View style={[styles.avatar, { width: avatarSize, height: avatarSize }]}>
-                  <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
-                </View>
-                <Text style={styles.playerName}>{player.username}</Text>
-              </>
-            ) : (
-              <>
-                <Text style={styles.playerName}>{player.username}</Text>
-                <View style={[styles.avatar, { width: avatarSize, height: avatarSize }]}>
-                  <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
-                </View>
-              </>
-            )}
+      <View style={[styles.playerContainer, isTop ? styles.topPlayer : styles.bottomPlayer]}>
+        <View style={styles.playerInfo}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
           </View>
-          {isMe && isActivePlayer && (
-            <Text style={[styles.yourTurnMessage, { fontSize: fontSizes.yourTurn }]}>Your Turn</Text>
-          )}
+          <View style={styles.playerDetails}>
+            <View style={styles.playerNameRow}>
+              <Text style={styles.playerName}>{player.username}</Text>
+              <Text style={styles.playerRating}>({player.rating})</Text>
+            </View>
+            {renderCapturedPieces(color)}
+          </View>
         </View>
-
-        {/* Timer and Captured Pieces */}
-        <View style={styles.centerSection}>
+        <View style={[styles.timerContainer, isActivePlayer && styles.activeTimer]}>
           <Text style={[styles.timer, { fontSize: fontSizes.timer }]}>{formatTime(timer)}</Text>
-          {renderCapturedPieces(color)}
         </View>
       </View>
     )
@@ -1164,18 +1147,40 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       {/* Bottom Player */}
       {renderPlayerInfo(bottomPlayerColor, false)}
 
-      {/* Hidden Controls - accessible via long press or gesture */}
-      <View style={styles.hiddenControls}>
-        <GameControls
-          socket={socket}
-          sessionId={gameState.sessionId}
-          gameStatus={gameState.status}
-          canResign={gameState.status === "active"}
-          canOfferDraw={gameState.status === "active"}
-          onFlipBoard={handleFlipBoard}
-        />
-        <TouchableOpacity style={styles.historyButton} onPress={() => setShowMoveHistory(true)}>
-          <Text style={styles.historyButtonText}>📜</Text>
+      {/* Bottom Control Bar */}
+      <View style={styles.bottomBar}>
+        <TouchableOpacity style={styles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
+          <Text style={styles.bottomBarIcon}>≡</Text>
+          <Text style={styles.bottomBarLabel}>Moves</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.bottomBarButton} onPress={handleFlipBoard}>
+          <Text style={styles.bottomBarIcon}>⟲</Text>
+          <Text style={styles.bottomBarLabel}>Flip</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.bottomBarButton}
+          onPress={() => {
+            if (socket && gameState.status === "active") {
+              socket.emit("game:resign")
+            }
+          }}
+        >
+          <Text style={styles.bottomBarIcon}>✕</Text>
+          <Text style={styles.bottomBarLabel}>Resign</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.bottomBarButton}
+          onPress={() => {
+            if (socket && gameState.status === "active") {
+              socket.emit("game:offerDraw")
+            }
+          }}
+        >
+          <Text style={styles.bottomBarIcon}>½</Text>
+          <Text style={styles.bottomBarLabel}>Draw</Text>
         </TouchableOpacity>
       </View>
 
@@ -1248,69 +1253,121 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#2F1B14", // Dark brown background like in the image
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 20,
+    backgroundColor: "#2c2c2c", // Chess.com dark background
+    justifyContent: "flex-start", // Changed from "space-between"
   },
   playerContainer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    width: "100%",
-    maxWidth: 500,
-    paddingHorizontal: 20,
-    marginVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "#2c2c2c",
   },
   topPlayer: {
-    // Top player: avatar left, timer right
+    paddingTop: 20, // Extra padding for status bar
   },
   bottomPlayer: {
-    // Bottom player: timer left, avatar right
-    flexDirection: "row-reverse",
+    paddingBottom: 20,
+  },
+  playerInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
   },
   avatar: {
-    backgroundColor: "#A0A0A0", // Gray background like in image
-    borderRadius: 50,
+    width: 50,
+    height: 50,
+    backgroundColor: "#666",
+    borderRadius: 25,
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 12,
   },
   avatarText: {
-    color: "#2F1B14",
-    fontSize: 24,
+    color: "#fff",
+    fontSize: 18,
     fontWeight: "bold",
   },
+  playerDetails: {
+    flex: 1,
+  },
+  playerNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  playerName: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "500",
+    marginRight: 8,
+  },
+  playerRating: {
+    color: "#999",
+    fontSize: 14,
+  },
+  timerContainer: {
+    backgroundColor: "#1a1a1a",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    minWidth: 70,
+    alignItems: "center",
+  },
+  activeTimer: {
+    backgroundColor: "#4a4a4a",
+  },
   timer: {
-    color: "#F5DEB3", // Cream color like in image
+    color: "#fff",
     fontWeight: "bold",
     fontFamily: "monospace",
   },
   capturedPieces: {
     flexDirection: "row",
     alignItems: "center",
-    flex: 1,
-    justifyContent: "center",
   },
   capturedPieceGroup: {
     flexDirection: "row",
     alignItems: "center",
-    marginHorizontal: 2,
+    marginRight: 4,
   },
   capturedPiece: {
-    color: "#F5DEB3",
+    color: "#999",
+    fontSize: 12,
   },
   capturedCount: {
-    color: "#F5DEB3",
-    fontSize: 12,
+    color: "#999",
+    fontSize: 10,
     marginLeft: 2,
   },
   boardContainer: {
     alignItems: "center",
-    marginVertical: 20,
+    flex: 1,
+    justifyContent: "center",
+    marginVertical: 10, // Add some margin
+  },
+  boardWrapper: {
+    position: "relative",
   },
   board: {
-    borderRadius: 4,
-    overflow: "hidden",
+    borderRadius: 0, // No border radius for full-width board
+  },
+  fileCoordinates: {
+    flexDirection: "row",
+    position: "absolute",
+    bottom: -20,
+    left: 0,
+  },
+  rankCoordinates: {
+    position: "absolute",
+    right: -20,
+    top: 0,
+  },
+  coordinateText: {
+    color: "#999",
+    fontSize: 12,
+    fontWeight: "500",
   },
   row: {
     flexDirection: "row",
@@ -1321,13 +1378,16 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   lastMoveSquare: {
-    backgroundColor: "#90EE90", // Light green for last move
+    backgroundColor: "#f7ec74", // Chess.com last move highlight
   },
   selectedSquare: {
-    backgroundColor: "#87CEEB", // Light blue for selected
+    backgroundColor: "#f7ec74", // Same as last move for consistency
   },
   possibleMoveSquare: {
-    backgroundColor: "#FFE4B5", // Light yellow for possible moves
+    backgroundColor: "rgba(255, 255, 0, 0.3)", // Subtle highlight for possible moves
+  },
+  captureMoveSquare: {
+    backgroundColor: "rgba(255, 0, 0, 0.3)", // Red tint for captures
   },
   piece: {
     fontWeight: "bold",
@@ -1341,25 +1401,8 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: "#4ade80",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
     opacity: 0.8,
-  },
-  hiddenControls: {
-    position: "absolute",
-    bottom: 10,
-    right: 10,
-    flexDirection: "row",
-    opacity: 0.3,
-  },
-  historyButton: {
-    backgroundColor: "rgba(0,0,0,0.5)",
-    padding: 8,
-    borderRadius: 20,
-    marginLeft: 8,
-  },
-  historyButtonText: {
-    color: "#F5DEB3",
-    fontSize: 16,
   },
   modalOverlay: {
     flex: 1,
@@ -1369,13 +1412,13 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   moveHistoryModal: {
-    backgroundColor: "#2F1B14",
+    backgroundColor: "#2c2c2c",
     borderRadius: 12,
     width: "90%",
     maxWidth: 400,
     maxHeight: "70%",
-    borderWidth: 2,
-    borderColor: "#F5DEB3",
+    borderWidth: 1,
+    borderColor: "#555",
   },
   moveHistoryHeader: {
     flexDirection: "row",
@@ -1383,10 +1426,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#F5DEB3",
+    borderBottomColor: "#555",
   },
   moveHistoryTitle: {
-    color: "#F5DEB3",
+    color: "#fff",
     fontSize: 18,
     fontWeight: "bold",
   },
@@ -1394,7 +1437,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   closeButtonText: {
-    color: "#F5DEB3",
+    color: "#fff",
     fontSize: 18,
     fontWeight: "bold",
   },
@@ -1408,24 +1451,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   moveNumber: {
-    color: "#A0A0A0",
+    color: "#999",
     fontSize: 14,
     width: 30,
     fontWeight: "bold",
   },
   moveText: {
-    color: "#F5DEB3",
+    color: "#fff",
     fontSize: 14,
     width: 60,
     marginHorizontal: 8,
   },
   gameEndModal: {
-    backgroundColor: "#2F1B14",
+    backgroundColor: "#2c2c2c",
     borderRadius: 16,
     padding: 24,
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#F5DEB3",
+    borderWidth: 1,
+    borderColor: "#555",
     maxWidth: "90%",
   },
   gameEndTitle: {
@@ -1433,34 +1476,34 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
     marginBottom: 16,
-    color: "#F5DEB3",
+    color: "#fff",
   },
   gameEndMessage: {
     fontSize: 16,
     textAlign: "center",
     marginBottom: 20,
-    color: "#F5DEB3",
+    color: "#fff",
     lineHeight: 22,
   },
   gameEndDetails: {
     marginBottom: 16,
   },
   gameEndDetailText: {
-    color: "#A0A0A0",
+    color: "#999",
     fontSize: 14,
     textAlign: "center",
     marginBottom: 4,
   },
   promotionModal: {
-    backgroundColor: "#2F1B14",
+    backgroundColor: "#2c2c2c",
     borderRadius: 12,
     padding: 20,
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#F5DEB3",
+    borderWidth: 1,
+    borderColor: "#555",
   },
   promotionTitle: {
-    color: "#F5DEB3",
+    color: "#fff",
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 20,
@@ -1475,7 +1518,7 @@ const styles = StyleSheet.create({
   promotionOption: {
     margin: 8,
     padding: 12,
-    backgroundColor: "#F5DEB3",
+    backgroundColor: "#F0D9B5",
     borderRadius: 8,
     minWidth: 50,
     minHeight: 50,
@@ -1490,52 +1533,41 @@ const styles = StyleSheet.create({
   cancelButton: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: "#A0A0A0",
+    backgroundColor: "#666",
     borderRadius: 8,
   },
   cancelButtonText: {
-    color: "#2F1B14",
+    color: "#fff",
     fontSize: 16,
     fontWeight: "bold",
   },
-  playerBorder: {
-    borderWidth: 1, // Slimmer border
-    borderColor: "#F5DEB3",
-    borderRadius: 8, // Slightly smaller radius for sleeker look
-    backgroundColor: "rgba(245, 222, 179, 0.05)", // More subtle background tint
-    paddingVertical: 8, // Reduced padding
-    paddingHorizontal: 12, // Reduced padding
-  },
-  playerInfoBlockLeft: {
-    flexDirection: "column",
-    alignItems: "flex-start",
-  },
-  playerInfoBlockRight: {
-    flexDirection: "column",
-    alignItems: "flex-end",
-  },
-  playerInfoGroup: {
+  bottomBar: {
     flexDirection: "row",
+    backgroundColor: "#1a1a1a",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    justifyContent: "space-around",
     alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "#333",
   },
-  centerSection: {
-    flexDirection: "row", // Changed to row to align timer and captured pieces
+  bottomBarButton: {
     alignItems: "center",
     justifyContent: "center",
-    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    minWidth: 60,
   },
-  playerName: {
-    color: "#F5DEB3",
-    fontSize: 16,
-    fontWeight: "500",
-    marginHorizontal: 8,
-  },
-  yourTurnMessage: {
-    color: "#90EE90", // A subtle green for "Your Turn"
+  bottomBarIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+    color: "#999", // Professional gray color that matches the theme
     fontWeight: "bold",
-    marginTop: 4, // Small margin below the player info group
   },
-  captureMoveSquare: {
-    backgroundColor: "#FF6B6B", // Red for capture moves
+  bottomBarLabel: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "500",
   },
 })
