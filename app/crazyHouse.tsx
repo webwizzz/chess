@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "expo-router"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../utils/socketManager"
@@ -16,17 +16,17 @@ interface Player {
   title: string | null
 }
 
-interface PocketPiece {
-  type: string
-  color: string
-  capturedAt?: number
-  timeRemaining?: number
+interface PocketTimer {
+  piece: string
+  capturedAt: number
+  expiresAt: number
+  remainingTime: number
 }
 
 interface GameState {
   sessionId: string
   variantName: string
-  subvariantName: string
+  subvariantName?: string
   description: string
   players: {
     white: Player
@@ -44,7 +44,7 @@ interface GameState {
     blackTime?: number
     turnStartTimestamp?: number
     lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
+    moveHistory?: { from: string; to: string; drop?: boolean; piece?: string; [key: string]: any }[]
     repetitionMap?: any
     gameStarted?: boolean
     firstMoveTimestamp?: number
@@ -52,10 +52,16 @@ interface GameState {
       white: string[]
       black: string[]
     }
-    pocketPieces?: {
-      white: PocketPiece[]
-      black: PocketPiece[]
+    pocketPanel?: {
+      white: string[]
+      black: string[]
     }
+    pocketTimers?: {
+      white: PocketTimer[]
+      black: PocketTimer[]
+    }
+    pocketTimeLimit?: number
+    gameVariant?: string
   }
   timeControl: {
     type: string
@@ -69,7 +75,6 @@ interface GameState {
       white: boolean
       black: boolean
     }
-    timeSpent?: { white: any; black: any }
   }
   status: string
   result: string
@@ -98,43 +103,35 @@ interface GameState {
     gameEnded?: boolean
     endReason?: string | null
     endTimestamp?: number
-    pocketPieces?: {
-      white: PocketPiece[]
-      black: PocketPiece[]
+    pocketPanel?: {
+      white: string[]
+      black: string[]
     }
-    variant?: string
+    pocketTimers?: {
+      white: PocketTimer[]
+      black: PocketTimer[]
+    }
+    expiredPieces?: {
+      white: string[]
+      black: string[]
+    }
   }
   userColor: {
     [key: string]: "white" | "black"
   }
-  positionHistory?: string[]
-  createdAt?: number
-  lastActivity?: number
-  startedAt?: number
-  endedAt?: number | null
-  rules?: any
-  metadata?: any
-  timers?: any
-  variant?: string
 }
 
 interface Move {
   from: string
   to: string
   promotion?: string
+  drop?: boolean
+  piece?: string
 }
 
-interface DropMove {
-  drop: {
-    piece: PocketPiece
-    square: string
-  }
-}
-
-interface ChessGameProps {
+interface CrazyhouseGameProps {
   initialGameState: GameState
   userId: string
-  subvariant?: string
   onNavigateToMenu?: () => void
 }
 
@@ -171,14 +168,14 @@ const PIECE_VALUES = {
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
 
-export default function CrazyHouse({ initialGameState, userId, subvariant, onNavigateToMenu }: ChessGameProps) {
+export default function CrazyhouseGame({ initialGameState, userId, onNavigateToMenu }: CrazyhouseGameProps) {
   const router = useRouter()
   const [gameState, setGameState] = useState<GameState>(initialGameState)
   const [socket, setSocket] = useState<Socket | null>(null)
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
-  const [selectedPocketPiece, setSelectedPocketPiece] = useState<PocketPiece | null>(null)
+  const [selectedPocketPiece, setSelectedPocketPiece] = useState<string | null>(null)
   const [possibleMoves, setPossibleMoves] = useState<string[]>([])
-  const [possibleDropSquares, setPossibleDropSquares] = useState<string[]>([])
+  const [possibleDrops, setPossibleDrops] = useState<string[]>([])
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [playerColor, setPlayerColor] = useState<"white" | "black">("white")
   const [boardFlipped, setBoardFlipped] = useState(false)
@@ -204,12 +201,22 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
   }>({})
 
   // Timer management
-  const lastUpdateRef = useRef<number>(Date.now())
-  const gameStartTimeRef = useRef<number | null>(null)
-  const isFirstMoveRef = useRef<boolean>(true)
   const timerRef = useRef<any>(null)
-  const navigationTimeoutRef = useRef<any>(null)
   const pocketTimerRef = useRef<any>(null)
+  const navigationTimeoutRef = useRef<any>(null)
+
+  // Screen dimensions
+  const screenWidth = Dimensions.get("window").width
+  const screenHeight = Dimensions.get("window").height
+  const isTablet = Math.min(screenWidth, screenHeight) > 600
+  const isSmallScreen = Math.min(screenWidth, screenHeight) < 400
+
+  // Calculate board size
+  const containerPadding = isTablet ? 24 : isSmallScreen ? 12 : 16
+  const availableWidth = screenWidth - containerPadding * 2
+  const pocketPanelWidth = Math.min(120, availableWidth * 0.25)
+  const boardSize = Math.min(availableWidth - pocketPanelWidth - 16, screenHeight * 0.5, isTablet ? 400 : 320)
+  const squareSize = boardSize / 8
 
   // Timer sync state
   function safeTimerValue(val: any): number {
@@ -222,13 +229,12 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
     black: safeTimerValue(initialGameState.timeControl.timers.black),
   })
 
-  // Pocket piece timers for timer variant
-  const [pocketPieceTimers, setPocketPieceTimers] = useState<{
-    white: PocketPiece[]
-    black: PocketPiece[]
+  const [localPocketTimers, setLocalPocketTimers] = useState<{
+    white: PocketTimer[]
+    black: PocketTimer[]
   }>({
-    white: [],
-    black: [],
+    white: initialGameState.board.pocketTimers?.white || [],
+    black: initialGameState.board.pocketTimers?.black || [],
   })
 
   const lastServerSync = useRef<{
@@ -247,97 +253,176 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
     isFirstMove: true,
   })
 
-  const screenWidth = Dimensions.get("window").width
-  const screenHeight = Dimensions.get("window").height
-  const isTablet = Math.min(screenWidth, screenHeight) > 600
-  const isSmallScreen = Math.min(screenWidth, screenHeight) < 400
+  // Helper functions
+  const isWithTimerVariant = useCallback(() => {
+    return (
+      gameState.board.gameVariant === "crazyhouse" ||
+      gameState.subvariantName?.includes("withTimer") ||
+      gameState.board.pocketTimeLimit !== undefined
+    )
+  }, [gameState.board.gameVariant, gameState.subvariantName, gameState.board.pocketTimeLimit])
 
-  const containerPadding = isTablet ? 24 : isSmallScreen ? 12 : 16
-  const boardSize = Math.min(screenWidth - containerPadding * 2, screenHeight * 0.4, isTablet ? 400 : 320)
-  const squareSize = boardSize / 8
-  const minTouchTarget = 44
+  const getPieceAt = useCallback(
+    (square: string): string | null => {
+      const fileIndex = FILES.indexOf(square[0])
+      const rankIndex = RANKS.indexOf(square[1])
+      if (fileIndex === -1 || rankIndex === -1) return null
 
-  const baseFontSize = isTablet ? 18 : isSmallScreen ? 14 : 16
-  const titleFontSize = isTablet ? 24 : isSmallScreen ? 18 : 20
-  const smallFontSize = isTablet ? 14 : isSmallScreen ? 11 : 12
+      const fen = gameState.board.fen || gameState.board.position
+      if (!fen) return null
 
-  // Check if this is timer variant
-  const isTimerVariant = subvariant === "crazyhouse-timer" || gameState.variant === "crazyhouse-timer"
+      const piecePlacement = fen.split(" ")[0]
+      const rows = piecePlacement.split("/")
+      if (rows.length !== 8) return null
+
+      const row = rows[rankIndex]
+      let col = 0
+      for (let i = 0; i < row.length; i++) {
+        const c = row[i]
+        if (c >= "1" && c <= "8") {
+          col += Number.parseInt(c)
+        } else {
+          if (col === fileIndex) {
+            return c
+          }
+          col++
+        }
+      }
+      return null
+    },
+    [gameState.board.fen, gameState.board.position],
+  )
+
+  const isPieceOwnedByPlayer = useCallback((piece: string, color: "white" | "black"): boolean => {
+    if (color === "white") {
+      return piece === piece.toUpperCase()
+    } else {
+      return piece === piece.toLowerCase()
+    }
+  }, [])
+
+  // Format time display
+  const formatTime = useCallback((milliseconds: number): string => {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0:00"
+    const totalSeconds = Math.floor(milliseconds / 1000)
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`
+  }, [])
+
+  // Format pocket timer display
+  const formatPocketTime = useCallback((milliseconds: number): string => {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0"
+    return Math.ceil(milliseconds / 1000).toString()
+  }, [])
+
+  // Update pocket timers for withTimer variant
+  const updatePocketTimers = useCallback(() => {
+    if (!isWithTimerVariant()) return
+
+    const currentTime = Date.now()
+    setLocalPocketTimers((prev) => {
+      const newTimers = { white: [...prev.white], black: [...prev.black] }
+      let hasChanges = false
+      ;(["white", "black"] as const).forEach((color) => {
+        newTimers[color] = newTimers[color].filter((timer) => {
+          const remaining = timer.expiresAt - currentTime
+          if (remaining <= 0) {
+            console.log(`[POCKET] ${color} ${timer.piece} expired`)
+            hasChanges = true
+            return false
+          }
+          timer.remainingTime = remaining
+          return true
+        })
+      })
+
+      return hasChanges ? newTimers : prev
+    })
+  }, [isWithTimerVariant])
 
   // Handle game ending
-  const handleGameEnd = (
-    result: string,
-    winner: string | null,
-    endReason: string,
-    details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null },
-  ) => {
-    console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
+  const handleGameEnd = useCallback(
+    (
+      result: string,
+      winner: string | null,
+      endReason: string,
+      details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null },
+    ) => {
+      console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
 
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
+      // Stop all timers
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
 
-    let playerWon: boolean | null = null
-    let message = ""
+      // Determine if current player won
+      let playerWon: boolean | null = null
+      let message = ""
 
-    if (result === "checkmate") {
-      if (winner === playerColor) {
-        playerWon = true
-        message = "🎉 VICTORY! 🎉\nCheckmate! You won the game!"
-      } else if (winner && winner !== playerColor) {
-        playerWon = false
-        message = "😔 DEFEAT 😔\nCheckmate! You lost the game."
+      if (result === "checkmate") {
+        if (winner === playerColor) {
+          playerWon = true
+          message = "🎉 VICTORY! 🎉\nCheckmate! You won the game!"
+        } else if (winner && winner !== playerColor) {
+          playerWon = false
+          message = "😔 DEFEAT 😔\nCheckmate! You lost the game."
+        } else {
+          playerWon = null
+          message = "🏁 GAME OVER 🏁\nCheckmate occurred"
+        }
+      } else if (result === "timeout") {
+        if (winner === playerColor) {
+          playerWon = true
+          message = "🎉 VICTORY! 🎉\nYour opponent ran out of time!"
+        } else if (winner && winner !== playerColor) {
+          playerWon = false
+          message = "😔 DEFEAT 😔\nYou ran out of time!"
+        } else {
+          playerWon = null
+          message = "🏁 GAME OVER 🏁\nTime expired"
+        }
+      } else if (result === "draw") {
+        playerWon = null
+        message = `⚖️ DRAW ⚖️\n${endReason || "Game ended in a draw"}`
       } else {
         playerWon = null
-        message = "🏁 GAME OVER 🏁\nCheckmate occurred"
+        message = `🏁 GAME OVER 🏁\n${result}`
       }
-    } else if (result === "timeout") {
-      if (winner === playerColor) {
-        playerWon = true
-        message = "🎉 VICTORY! 🎉\nYour opponent ran out of time!"
-      } else if (winner && winner !== playerColor) {
-        playerWon = false
-        message = "😔 DEFEAT 😔\nYou ran out of time!"
-      } else {
-        playerWon = null
-        message = "🏁 GAME OVER 🏁\nTime expired"
-      }
-    } else if (result === "draw") {
-      playerWon = null
-      message = `⚖️ DRAW ⚖️\n${endReason || "Game ended in a draw"}`
-    } else {
-      playerWon = null
-      message = `🏁 GAME OVER 🏁\n${result}`
-    }
 
-    setIsWinner(playerWon)
-    setGameEndMessage(message)
-    setShowGameEndModal(true)
-    setGameEndDetails({
-      reason: endReason,
-      moveSan: details?.moveSan,
-      moveMaker: details?.moveMaker,
-      winner,
-      winnerName: details?.winnerName,
-    })
+      setIsWinner(playerWon)
+      setGameEndMessage(message)
+      setShowGameEndModal(true)
+      setGameEndDetails({
+        reason: endReason,
+        moveSan: details?.moveSan,
+        moveMaker: details?.moveMaker,
+        winner,
+        winnerName: details?.winnerName,
+      })
 
-    setTimeout(() => {
-      if (socket) {
-        console.log("[SOCKET] Disconnecting from game")
-        socket.disconnect()
-        setSocket(null)
-      }
-    }, 1000)
+      // Disconnect socket after delay
+      setTimeout(() => {
+        if (socket) {
+          console.log("[SOCKET] Disconnecting from game")
+          socket.disconnect()
+          setSocket(null)
+        }
+      }, 1000)
 
-    navigationTimeoutRef.current = setTimeout(() => {
-      setShowGameEndModal(false)
-      if (onNavigateToMenu) {
-        onNavigateToMenu()
-      }
-      router.replace("/choose")
-    }, 5000)
-  }
+      // Auto-navigate to menu
+      navigationTimeoutRef.current = setTimeout(() => {
+        setShowGameEndModal(false)
+        if (onNavigateToMenu) {
+          onNavigateToMenu()
+        }
+        router.replace("/choose")
+      }, 5000)
+    },
+    [playerColor, socket, onNavigateToMenu, router],
+  )
 
-  const navigateToMenu = () => {
+  // Navigate to menu manually
+  const navigateToMenu = useCallback(() => {
     if (navigationTimeoutRef.current) {
       clearTimeout(navigationTimeoutRef.current)
     }
@@ -349,13 +434,14 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
     if (onNavigateToMenu) {
       onNavigateToMenu()
     }
-  }
+  }, [socket, onNavigateToMenu])
 
+  // Initialize game
   useEffect(() => {
     const gameSocket = getSocketInstance()
     if (gameSocket) {
       setSocket(gameSocket)
-      console.log("Connected to game socket")
+      console.log("Connected to Crazyhouse game socket")
     }
 
     if (!gameSocket) {
@@ -364,31 +450,21 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
       return
     }
 
+    // Initial player color and board orientation
     const userColor = gameState.userColor[userId]
     const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white"
     setPlayerColor(safePlayerColor)
     setBoardFlipped(safePlayerColor === "black")
     setIsMyTurn(gameState.board.activeColor === safePlayerColor)
 
-    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
-    isFirstMoveRef.current = moveCount === 0
-
-    if (!gameStartTimeRef.current) {
-      gameStartTimeRef.current = Date.now()
-    }
-
-    // Initialize pocket pieces
-    const initialPocketPieces = gameState.board.pocketPieces ||
-      gameState.gameState?.pocketPieces || { white: [], black: [] }
-    setPocketPieceTimers(initialPocketPieces)
-
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
       if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
       if (navigationTimeoutRef.current) clearTimeout(navigationTimeoutRef.current)
     }
-  }, [])
+  }, [gameState.userColor, userId, gameState.board.activeColor])
 
+  // Update player state when game state changes
   useEffect(() => {
     const userColor = gameState.userColor[userId]
     const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white"
@@ -397,49 +473,378 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
     setIsMyTurn(gameState.board.activeColor === safePlayerColor)
   }, [gameState, userId])
 
-  // Update pocket pieces when game state changes
+  // Timer management effect
   useEffect(() => {
-    const pocketPieces = gameState.board.pocketPieces || gameState.gameState?.pocketPieces || { white: [], black: [] }
-    setPocketPieceTimers(pocketPieces)
-  }, [gameState.board.pocketPieces, gameState.gameState?.pocketPieces])
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (gameState.status !== "active" || gameState.gameState?.gameEnded) return
 
-  // Pocket piece timer countdown for timer variant
+    // Update server sync reference
+    const now = Date.now()
+    const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
+    const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
+    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
+    const isFirstMove = moveCount === 0
+
+    // Initialize local timers immediately
+    setLocalTimers({
+      white: currentWhiteTime,
+      black: currentBlackTime,
+    })
+
+    lastServerSync.current = {
+      white: currentWhiteTime,
+      black: currentBlackTime,
+      activeColor: gameState.board.activeColor,
+      timestamp: now,
+      turnStartTime: gameState.board.turnStartTimestamp || now,
+      isFirstMove: isFirstMove,
+    }
+
+    console.log("[TIMER] Setting up timer for active color:", gameState.board.activeColor)
+    console.log("[TIMER] Initial times - White:", currentWhiteTime, "Black:", currentBlackTime)
+
+    // Start local timer countdown
+    timerRef.current = setInterval(() => {
+      const now = Date.now()
+      const serverSync = lastServerSync.current
+      const elapsedSinceSync = now - serverSync.timestamp
+
+      setLocalTimers((prev) => {
+        let newWhite = serverSync.white
+        let newBlack = serverSync.black
+
+        if (!serverSync.isFirstMove) {
+          if (serverSync.activeColor === "white") {
+            newWhite = Math.max(0, serverSync.white - elapsedSinceSync)
+            newBlack = serverSync.black
+          } else if (serverSync.activeColor === "black") {
+            newBlack = Math.max(0, serverSync.black - elapsedSinceSync)
+            newWhite = serverSync.white
+          }
+        }
+
+        // Check for timeout
+        if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("WHITE TIMEOUT DETECTED")
+          handleGameEnd("timeout", "black", "White ran out of time")
+          return { white: 0, black: newBlack }
+        }
+        if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("BLACK TIMEOUT DETECTED")
+          handleGameEnd("timeout", "white", "Black ran out of time")
+          return { white: newWhite, black: 0 }
+        }
+
+        return { white: newWhite, black: newBlack }
+      })
+    }, 100)
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [
+    gameState.status,
+    gameState.board.activeColor,
+    gameState.timeControl.timers.white,
+    gameState.timeControl.timers.black,
+    gameState.board.turnStartTimestamp,
+    gameState.moves?.length,
+    gameState.board?.moveHistory?.length,
+    gameState.gameState?.gameEnded,
+    handleGameEnd,
+  ])
+
+  // Pocket timer management effect (for withTimer variant)
   useEffect(() => {
-    if (!isTimerVariant) return
+    if (!isWithTimerVariant()) return
 
     if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
 
     pocketTimerRef.current = setInterval(() => {
-      setPocketPieceTimers((prev) => {
-        const updated = { white: [], black: [] }
-        const now = Date.now()[("white", "black")].forEach((color) => {
-          prev[color as "white" | "black"].forEach((piece) => {
-            if (piece.capturedAt && piece.timeRemaining !== undefined) {
-              const elapsed = now - piece.capturedAt
-              const remaining = Math.max(0, 10000 - elapsed) // 10 second timer
-
-              if (remaining > 0) {
-                updated[color as "white" | "black"].push({
-                  ...piece,
-                  timeRemaining: remaining,
-                })
-              }
-            } else {
-              // Piece without timer (shouldn't happen in timer variant)
-              updated[color as "white" | "black"].push(piece)
-            }
-          })
-        })
-
-        return updated
-      })
+      updatePocketTimers()
     }, 100)
 
     return () => {
       if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
     }
-  }, [isTimerVariant, pocketPieceTimers])
+  }, [isWithTimerVariant, updatePocketTimers])
 
+  // Socket event handlers (same as before but with Alert instead of alert)
+  const handleGameMove = useCallback(
+    (data: any) => {
+      console.log("[MOVE] Move received:", data)
+      if (data && data.gameState) {
+        // Extract timer values
+        const newWhiteTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime,
+        )
+        const newBlackTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime,
+        )
+
+        // Update server sync reference
+        const now = Date.now()
+        lastServerSync.current = {
+          white: newWhiteTime,
+          black: newBlackTime,
+          activeColor: data.gameState.board.activeColor,
+          timestamp: now,
+          turnStartTime: data.gameState.board.turnStartTimestamp || now,
+          isFirstMove: (data.gameState.moves?.length || 0) === 0,
+        }
+
+        // Check if game ended
+        if (
+          data.gameState.gameState?.gameEnded ||
+          data.gameState.gameState?.checkmate ||
+          data.gameState.status === "ended" ||
+          data.gameState.shouldNavigateToMenu
+        ) {
+          const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+          let winner = data.gameState.gameState?.winner || data.gameState.winner
+
+          if (result === "checkmate") {
+            const checkmatedPlayer = data.gameState.board.activeColor
+            winner = checkmatedPlayer === "white" ? "black" : "white"
+          }
+
+          const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
+          const lastMove = data.gameState.move || data.move
+          const moveMaker = lastMove?.color || "unknown"
+          const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+
+          let winnerName = null
+          if (winner && data.gameState.players && data.gameState.players[winner]) {
+            winnerName = data.gameState.players[winner].username
+          }
+
+          handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
+          return
+        }
+
+        // Update game state
+        setGameState((prevState) => ({
+          ...prevState,
+          ...data.gameState,
+          board: {
+            ...prevState.board,
+            ...data.gameState.board,
+          },
+          timeControl: {
+            ...prevState.timeControl,
+            ...data.gameState.timeControl,
+            timers: {
+              white: newWhiteTime,
+              black: newBlackTime,
+            },
+          },
+          moves: data.gameState.moves || [],
+          lastMove: data.gameState.lastMove,
+          moveCount: data.gameState.moveCount,
+        }))
+
+        // Update pocket timers if withTimer variant
+        if (isWithTimerVariant() && data.gameState.board.pocketTimers) {
+          setLocalPocketTimers({
+            white: data.gameState.board.pocketTimers.white || [],
+            black: data.gameState.board.pocketTimers.black || [],
+          })
+        }
+
+        // Update local timers
+        setLocalTimers({ white: newWhiteTime, black: newBlackTime })
+        setMoveHistory(data.gameState.moves || [])
+        setSelectedSquare(null)
+        setSelectedPocketPiece(null)
+        setPossibleMoves([])
+        setPossibleDrops([])
+
+        // Update turn state
+        const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
+        const activeColor = data.gameState.board.activeColor
+        const newIsMyTurn = activeColor === userColor
+        setIsMyTurn(newIsMyTurn)
+      }
+    },
+    [gameState.timeControl.timers, handleGameEnd, userId, playerColor, isWithTimerVariant],
+  )
+
+  const handlePossibleMoves = useCallback((data: { square: string; moves: any[]; drops?: any[] }) => {
+    console.log("Possible moves received:", data)
+    console.log("Possible moves received RAW data:", data)
+
+    let moves: string[] = []
+    if (Array.isArray(data.moves) && data.moves.length > 0) {
+      if (typeof data.moves[0] === "object" && data.moves[0].to) {
+        moves = data.moves.map((m: any) => m.to)
+      } else if (typeof data.moves[0] === "string" && data.moves[0].length === 4) {
+        moves = data.moves.map((m: string) => m.slice(2, 4))
+      } else if (typeof data.moves[0] === "string") {
+        moves = data.moves
+      }
+    }
+
+    let drops: string[] = []
+    if (Array.isArray(data.drops) && data.drops.length > 0) {
+      if (typeof data.drops[0] === "object" && data.drops[0].square) {
+        drops = data.drops.map((d: any) => d.square)
+      } else if (typeof data.drops[0] === "string") {
+        drops = data.drops
+      }
+    }
+
+    console.log("Setting possibleMoves to:", moves)
+    console.log("Setting possibleDrops to:", drops)
+    setPossibleMoves(moves)
+    setPossibleDrops(drops)
+  }, [])
+
+  // Other socket handlers (simplified for brevity - same logic as web version)
+  const handleGameStateUpdate = useCallback(
+    (data: any) => {
+      console.log("Game state update:", data)
+      if (data && data.gameState) {
+        // Check for game ending
+        if (
+          data.gameState.gameState?.gameEnded ||
+          data.gameState.status === "ended" ||
+          data.gameState.shouldNavigateToMenu
+        ) {
+          const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+          const winner = data.gameState.gameState?.winner || data.gameState.winner
+          const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
+          handleGameEnd(result, winner, endReason)
+          return
+        }
+
+        // Extract timer values
+        const newWhiteTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime,
+        )
+        const newBlackTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime,
+        )
+
+        // Update server sync reference
+        const now = Date.now()
+        lastServerSync.current = {
+          white: newWhiteTime,
+          black: newBlackTime,
+          activeColor: data.gameState.board.activeColor,
+          timestamp: now,
+          turnStartTime: data.gameState.board.turnStartTimestamp || now,
+          isFirstMove: (data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0) === 0,
+        }
+
+        setGameState((prevState) => ({
+          ...prevState,
+          ...data.gameState,
+          timeControl: {
+            ...prevState.timeControl,
+            ...data.gameState.timeControl,
+            timers: {
+              white: newWhiteTime,
+              black: newBlackTime,
+            },
+          },
+        }))
+
+        setLocalTimers({ white: newWhiteTime, black: newBlackTime })
+        setIsMyTurn(data.gameState.board.activeColor === playerColor)
+      }
+    },
+    [handleGameEnd, playerColor, gameState.timeControl.timers],
+  )
+
+  const handleTimerUpdate = useCallback(
+    (data: any) => {
+      console.log("Timer update:", data)
+
+      // Check for game ending
+      if (data.gameEnded || data.shouldNavigateToMenu) {
+        const result = data.endReason || "timeout"
+        const winner = data.winner || data.winnerColor
+        handleGameEnd(result, winner, result)
+        return
+      }
+
+      // Handle timer update formats
+      let whiteTime: number
+      let blackTime: number
+
+      if (data.timers && typeof data.timers === "object") {
+        whiteTime = safeTimerValue(data.timers.white)
+        blackTime = safeTimerValue(data.timers.black)
+      } else if (typeof data.white === "number" && typeof data.black === "number") {
+        whiteTime = safeTimerValue(data.white)
+        blackTime = safeTimerValue(data.black)
+      } else {
+        whiteTime = safeTimerValue(data.white ?? data.timers?.white ?? gameState.timeControl.timers.white)
+        blackTime = safeTimerValue(data.black ?? data.timers?.black ?? gameState.timeControl.timers.black)
+      }
+
+      console.log("[TIMER UPDATE] White:", whiteTime, "Black:", blackTime)
+
+      // Update server sync reference
+      lastServerSync.current = {
+        white: whiteTime,
+        black: blackTime,
+        activeColor: data.activeColor || gameState.board.activeColor,
+        timestamp: Date.now(),
+        turnStartTime: data.turnStartTimestamp || Date.now(),
+        isFirstMove: (gameState.moves?.length || gameState.board?.moveHistory?.length || 0) === 0,
+      }
+
+      // Update local timers
+      setLocalTimers({ white: whiteTime, black: blackTime })
+
+      setGameState((prevState) => ({
+        ...prevState,
+        timeControl: {
+          ...prevState.timeControl,
+          timers: { white: whiteTime, black: blackTime },
+        },
+        board: {
+          ...prevState.board,
+          activeColor: data.activeColor || prevState.board.activeColor,
+        },
+      }))
+    },
+    [
+      handleGameEnd,
+      gameState.board.activeColor,
+      gameState.moves?.length,
+      gameState.board?.moveHistory?.length,
+      gameState.timeControl.timers,
+    ],
+  )
+
+  const handleGameEndEvent = useCallback(
+    (data: any) => {
+      console.log("Game end event received:", data)
+      const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
+      const winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
+      const endReason = data.gameState?.gameState?.endReason || data.gameState?.endReason || data.endReason || result
+      handleGameEnd(result, winner, endReason)
+    },
+    [handleGameEnd],
+  )
+
+  const handleGameError = useCallback((data: any) => {
+    console.log("Game error:", data)
+    Alert.alert("Error", data.message || data.error || "An error occurred")
+  }, [])
+
+  const handleGameWarning = useCallback((data: any) => {
+    console.warn("[GAME WARNING] Received warning:", data)
+    setGameState((prev) => ({ ...prev, gameState: data.gameState }))
+    Alert.alert("Game Warning", data.message || "An unexpected warning occurred.")
+  }, [])
+
+  // Add this new state and effect after the existing useState declarations:
+  const [socketConnected, setSocketConnected] = useState(false)
+
+  // Set up socket event listeners
   useEffect(() => {
     if (!socket) return
 
@@ -460,535 +865,248 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
       socket.off("game:error", handleGameError)
       socket.off("game:warning", handleGameWarning)
     }
-  }, [socket, playerColor])
-
-  // Main timer effect
-  useEffect(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-    }
-    if (gameState.status !== "active" || gameState.gameState?.gameEnded) {
-      return
-    }
-
-    const now = Date.now()
-    const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
-    const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
-    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
-    const isFirstMove = moveCount === 0
-
-    lastServerSync.current = {
-      white: currentWhiteTime,
-      black: currentBlackTime,
-      activeColor: gameState.board.activeColor,
-      timestamp: now,
-      turnStartTime: gameState.board.turnStartTimestamp || now,
-      isFirstMove: isFirstMove,
-    }
-
-    timerRef.current = setInterval(() => {
-      const now = Date.now()
-      const serverSync = lastServerSync.current
-      const elapsedSinceSync = now - serverSync.timestamp
-
-      setLocalTimers((prev) => {
-        let newWhite = serverSync.white
-        let newBlack = serverSync.black
-
-        if (!serverSync.isFirstMove) {
-          if (serverSync.activeColor === "white") {
-            newWhite = Math.max(0, serverSync.white - elapsedSinceSync)
-            newBlack = serverSync.black
-          } else if (serverSync.activeColor === "black") {
-            newBlack = Math.max(0, serverSync.black - elapsedSinceSync)
-            newWhite = serverSync.white
-          }
-        } else {
-          newWhite = serverSync.white
-          newBlack = serverSync.black
-        }
-
-        if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
-          console.log("WHITE TIMEOUT DETECTED - Ending game")
-          handleGameEnd("timeout", "black", "White ran out of time")
-          return { white: 0, black: newBlack }
-        }
-        if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
-          console.log("BLACK TIMEOUT DETECTED - Ending game")
-          handleGameEnd("timeout", "white", "Black ran out of time")
-          return { white: newWhite, black: 0 }
-        }
-
-        return { white: newWhite, black: newBlack }
-      })
-    }, 100)
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-      }
-    }
   }, [
-    gameState.status,
-    gameState.board.activeColor,
-    gameState.timeControl.timers.white,
-    gameState.timeControl.timers.black,
-    gameState.board.turnStartTimestamp,
-    gameState.moves?.length,
-    gameState.board?.moveHistory?.length,
-    gameState.gameState?.gameEnded,
+    socket,
+    handleGameMove,
+    handlePossibleMoves,
+    handleGameStateUpdate,
+    handleTimerUpdate,
+    handleGameEndEvent,
+    handleGameError,
+    handleGameWarning,
   ])
 
-  const handleGameMove = (data: any) => {
-    console.log("[MOVE] Move received:", data)
-    if (data && data.gameState) {
-      const now = Date.now()
-      const previousMoveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
-      const newMoveCount = data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0
-      const wasFirstMove = previousMoveCount === 0 && newMoveCount === 1
+  // Add this effect after the existing useEffects:
+  useEffect(() => {
+    if (!socket) return
 
-      let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
-      let newBlackTime = safeTimerValue(gameState.timeControl.timers.black)
+    const handleConnect = () => {
+      console.log("[SOCKET] Connected")
+      setSocketConnected(true)
+    }
 
-      if (data.gameState.timeControl?.timers?.white !== undefined) {
-        newWhiteTime = safeTimerValue(data.gameState.timeControl.timers.white)
-      } else if (data.gameState.board?.whiteTime !== undefined) {
-        newWhiteTime = safeTimerValue(data.gameState.board.whiteTime)
+    const handleDisconnect = () => {
+      console.log("[SOCKET] Disconnected")
+      setSocketConnected(false)
+    }
+
+    const handleConnectError = (error: any) => {
+      console.error("[SOCKET] Connection error:", error)
+      setSocketConnected(false)
+      Alert.alert("Connection Error", "Failed to connect to game server. Please check your internet connection.")
+    }
+
+    socket.on("connect", handleConnect)
+    socket.on("disconnect", handleDisconnect)
+    socket.on("connect_error", handleConnectError)
+
+    // Check initial connection state
+    setSocketConnected(socket.connected)
+
+    return () => {
+      socket.off("connect", handleConnect)
+      socket.off("disconnect", handleDisconnect)
+      socket.off("connect_error", handleConnectError)
+    }
+  }, [socket])
+
+  // Game interaction functions
+  const requestPossibleMoves = useCallback(
+    (square: string) => {
+      if (!socket) {
+        console.log("[DEBUG] requestPossibleMoves: No socket connection.")
+        Alert.alert("Connection Error", "No socket connection. Cannot request moves.")
+        return
       }
-
-      if (data.gameState.timeControl?.timers?.black !== undefined) {
-        newBlackTime = safeTimerValue(data.gameState.timeControl.timers.black)
-      } else if (data.gameState.board?.blackTime !== undefined) {
-        newBlackTime = safeTimerValue(data.gameState.board.blackTime)
+      if (!socket.connected) {
+        console.log("[DEBUG] requestPossibleMoves: Socket not connected.")
+        Alert.alert("Connection Error", "Socket not connected. Cannot request moves.")
+        return
       }
+      console.log("[DEBUG] Emitting game:getPossibleMoves for square:", square)
+      socket.emit("game:getPossibleMoves", { square })
+    },
+    [socket],
+  )
 
-      if (wasFirstMove) {
-        console.log("[MOVE] First move detected - preserving initial timer values")
-        newWhiteTime = localTimers.white
-        newBlackTime = localTimers.black
-      }
+  const makeMove = useCallback(
+    (move: Move) => {
+      console.log(
+        "[DEBUG] Attempting to make move",
+        move,
+        "isMyTurn:",
+        isMyTurn,
+        "socket connected:",
+        !!socket?.connected,
+      )
 
-      lastServerSync.current = {
-        white: newWhiteTime,
-        black: newBlackTime,
-        activeColor: data.gameState.board.activeColor,
-        timestamp: now,
-        turnStartTime: data.gameState.board.turnStartTimestamp || now,
-        isFirstMove: newMoveCount === 0,
-      }
-
-      // Check for game end
-      if (
-        data.gameState.gameState?.gameEnded ||
-        data.gameState.gameState?.checkmate ||
-        data.gameState.status === "ended" ||
-        data.gameState.shouldNavigateToMenu
-      ) {
-        console.log("[MOVE] Game ended detected:", data.gameState.gameState)
-        const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
-        let winner = data.gameState.gameState?.winner || data.gameState.winner
-
-        if (winner === "white" || winner === "black") {
-          // Winner is already the color, use it as is
-        } else if (data.gameState.gameState?.winnerColor) {
-          winner = data.gameState.gameState.winnerColor
-        } else if (result === "checkmate") {
-          const checkmatedPlayer = data.gameState.board.activeColor
-          winner = checkmatedPlayer === "white" ? "black" : "white"
-        }
-
-        const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
-        const lastMove = data.gameState.move || data.move
-        const moveMaker = lastMove?.color || "unknown"
-        const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
-        let winnerName = null
-        if (winner && data.gameState.players && data.gameState.players[winner]) {
-          winnerName = data.gameState.players[winner].username
-        }
-
-        handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
+      if (!socket) {
+        console.log("[DEBUG] No socket connection")
+        Alert.alert("Connection Error", "No socket connection. Please check your internet connection.")
         return
       }
 
-      setGameState((prevState) => ({
-        ...prevState,
-        ...data.gameState,
-        board: {
-          ...prevState.board,
-          ...data.gameState.board,
-        },
-        timeControl: {
-          ...prevState.timeControl,
-          ...data.gameState.timeControl,
-          timers: {
-            white: newWhiteTime,
-            black: newBlackTime,
-          },
-        },
-        moves: data.gameState.moves || [],
-        lastMove: data.gameState.lastMove,
-        moveCount: data.gameState.moveCount,
-      }))
+      if (!socket.connected) {
+        console.log("[DEBUG] Socket not connected")
+        Alert.alert("Connection Error", "Socket not connected. Please try again.")
+        return
+      }
 
-      setLocalTimers({
-        white: newWhiteTime,
-        black: newBlackTime,
-      })
+      if (!isMyTurn) {
+        console.log("[DEBUG] Not your turn")
+        Alert.alert("Invalid Move", "It's not your turn.")
+        return
+      }
 
-      setMoveHistory(data.gameState.moves || [])
+      // Immediately update local state (optimistic update)
+      setIsMyTurn(false)
       setSelectedSquare(null)
       setSelectedPocketPiece(null)
       setPossibleMoves([])
-      setPossibleDropSquares([])
+      setPossibleDrops([])
 
-      const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
-      const activeColor = data.gameState.board.activeColor
-      const newIsMyTurn = activeColor === userColor
-      setIsMyTurn(newIsMyTurn)
-    }
-  }
-
-  const handlePossibleMoves = (data: { square?: string; moves: any[] }) => {
-    console.log("Possible moves (raw):", data.moves)
-    const moves: string[] = []
-    const dropSquares: string[] = []
-
-    if (Array.isArray(data.moves) && data.moves.length > 0) {
-      data.moves.forEach((m: any) => {
-        if (m.drop) {
-          dropSquares.push(m.to)
-        } else if (typeof m === "object" && m.to) {
-          moves.push(m.to)
-        } else if (typeof m === "string" && m.length === 4) {
-          moves.push(m.slice(2, 4))
-        } else if (typeof m === "string") {
-          // Fallback for single square strings if needed
-          if (m.length === 2 && FILES.includes(m[0]) && RANKS.includes(m[1])) {
-            moves.push(m)
-          }
-        }
-      })
-    }
-    console.log("Possible standard moves (dest squares):", moves)
-    console.log("Possible drop squares:", dropSquares)
-    setPossibleMoves(moves)
-    setPossibleDropSquares(dropSquares)
-  }
-
-  const handleGameStateUpdate = (data: any) => {
-    console.log("Game state update:", data)
-    if (data && data.gameState) {
-      if (
-        data.gameState.gameState?.gameEnded ||
-        data.gameState.status === "ended" ||
-        data.gameState.shouldNavigateToMenu
-      ) {
-        const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
-        let winner = data.gameState.gameState?.winner || data.gameState.winner
-        if (winner === "white" || winner === "black") {
-          // Winner is already the color
-        } else if (data.gameState.gameState?.winnerColor) {
-          winner = data.gameState.gameState.winnerColor
-        }
-        const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
-        handleGameEnd(result, winner, endReason)
-        return
-      }
-
-      lastServerSync.current = {
-        white: safeTimerValue(data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime),
-        black: safeTimerValue(data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime),
-        activeColor: data.gameState.board.activeColor,
+      const moveData = {
+        move: {
+          from: move.from,
+          to: move.to,
+          promotion: move.promotion,
+          drop: move.drop,
+          piece: move.piece,
+        },
         timestamp: Date.now(),
-        turnStartTime: data.gameState.board.turnStartTimestamp || Date.now(),
-        isFirstMove: (data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0) === 0,
       }
 
-      setGameState((prevState) => ({
-        ...prevState,
-        ...data.gameState,
-        timeControl: {
-          ...prevState.timeControl,
-          ...data.gameState.timeControl,
-          timers: {
-            white: safeTimerValue(data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime),
-            black: safeTimerValue(data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime),
-          },
-        },
-      }))
-      setIsMyTurn(data.gameState.board.activeColor === playerColor)
-    }
-  }
+      console.log("[DEBUG] Emitting move:", moveData)
+      socket.emit("game:makeMove", moveData)
 
-  const handleGameTimerUpdate = (data: any) => {
-    console.log("Timer update:", data)
-    if (data.gameEnded || data.shouldNavigateToMenu) {
-      const result = data.endReason || "timeout"
-      const winner = data.winner
-      handleGameEnd(result, winner, result)
-      return
-    }
+      // Add timeout to reset state if no response
+      setTimeout(() => {
+        if (!socket?.connected) {
+          console.log("[DEBUG] Move timeout - resetting state")
+          setIsMyTurn(gameState.board.activeColor === playerColor)
+        }
+      }, 5000)
+    },
+    [socket, isMyTurn, gameState.board.activeColor, playerColor],
+  )
 
-    let whiteTime: number
-    let blackTime: number
-    if (data.timers && typeof data.timers === "object") {
-      whiteTime = safeTimerValue(data.timers.white)
-      blackTime = safeTimerValue(data.timers.black)
-    } else if (typeof data.timers === "number" && typeof data.black === "number") {
-      whiteTime = safeTimerValue(data.white)
-      blackTime = safeTimerValue(data.black)
-    } else {
-      whiteTime = safeTimerValue(data.white ?? data.timers?.white)
-      blackTime = safeTimerValue(data.black ?? data.timers?.black)
-    }
-
-    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
-    const isFirstMove = moveCount === 0
-
-    lastServerSync.current = {
-      white: whiteTime,
-      black: blackTime,
-      activeColor: gameState.board.activeColor,
-      timestamp: Date.now(),
-      turnStartTime: Date.now(),
-      isFirstMove: isFirstMove,
-    }
-
-    setLocalTimers({
-      white: whiteTime,
-      black: blackTime,
-    })
-
-    setGameState((prevState) => ({
-      ...prevState,
-      timeControl: {
-        ...prevState.timeControl,
-        timers: {
-          white: whiteTime,
-          black: blackTime,
-        },
-      },
-    }))
-  }
-
-  const handleTimerUpdate = (data: any) => {
-    handleGameTimerUpdate(data)
-  }
-
-  const handleGameEndEvent = (data: any) => {
-    console.log("Game end event received:", data)
-    const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
-    let winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
-    if (winner === "white" || winner === "black") {
-      // Winner is already the color
-    } else if (data.gameState?.gameState?.winnerColor) {
-      winner = data.gameState.gameState.winnerColor
-    }
-    const endReason = data.gameState?.gameState?.endReason || data.gameState?.endReason || data.endReason || result
-    handleGameEnd(result, winner, endReason)
-  }
-
-  const handleGameError = (data: any) => {
-    console.log("Game error:", data)
-    Alert.alert("Error", data.message || data.error || "An error occurred")
-  }
-
-  const handleGameWarning = (data: any) => {
-    const message = data?.message || "Warning: Invalid move or rule violation."
-    setGameState((prev) => ({ ...prev, gameState: data.gameState }))
-    Alert.alert("Warning", message)
-  }
-
-  const requestPossibleMoves = (square: string) => {
-    if (!socket) return
-    socket.emit("game:getPossibleMoves", {
-      square: square,
-    })
-  }
-
-  const requestPossibleDrops = (piece: PocketPiece) => {
-    if (!socket) return
-    socket.emit("game:getPossibleMoves", {
-      dropPiece: { type: piece.type, color: piece.color === "w" ? "white" : "black" }, // Normalize color for backend consistency
-    })
-  }
-
-  const makeMove = (move: Move) => {
-    console.log(
-      "[DEBUG] Attempting to make move",
-      move,
-      "isMyTurn:",
-      isMyTurn,
-      "playerColor:",
-      playerColor,
-      "activeColor:",
-      gameState.board.activeColor,
-    )
-    if (!socket || !isMyTurn) {
-      console.log("[DEBUG] Not emitting move: socket or isMyTurn false")
-      return
-    }
-
-    setIsMyTurn(false)
-    setSelectedSquare(null)
-    setSelectedPocketPiece(null)
-    setPossibleMoves([])
-    setPossibleDropSquares([])
-
-    socket.emit("game:makeMove", {
-      move: { from: move.from, to: move.to, promotion: move.promotion },
-      timestamp: Date.now(),
-    })
-    console.log("[DEBUG] Move emitted:", { from: move.from, to: move.to, promotion: move.promotion })
-  }
-
-  const makeDrop = (piece: PocketPiece, square: string) => {
-    console.log("[DEBUG] Attempting to drop piece", piece, "to", square)
-    if (!socket || !isMyTurn) {
-      console.log("[DEBUG] Not emitting drop: socket or isMyTurn false")
-      return
-    }
-
-    setIsMyTurn(false)
-    setSelectedSquare(null)
-    setSelectedPocketPiece(null)
-    setPossibleMoves([])
-    setPossibleDropSquares([])
-
-    socket.emit("game:makeMove", {
-      move: {
-        drop: {
-          piece: piece,
-          square: square,
-        },
-      },
-      timestamp: Date.now(),
-    })
-    console.log("[DEBUG] Drop emitted:", { piece, square })
-  }
-
-  const handleSquarePress = (square: string) => {
-    // If we have a selected pocket piece, try to drop it
-    if (selectedPocketPiece && possibleDropSquares.includes(square)) {
-      makeDrop(selectedPocketPiece, square)
-      return
-    }
-
-    if (selectedSquare === square) {
-      setSelectedSquare(null)
-      setPossibleMoves([])
-      return
-    }
-
-    if (selectedSquare && possibleMoves.includes(square)) {
-      const piece = getPieceAt(selectedSquare)
-      const isPromotion =
-        piece &&
-        ((piece.toLowerCase() === "p" && playerColor === "white" && square[1] === "8") ||
-          (piece.toLowerCase() === "p" && playerColor === "black" && square[1] === "1"))
-
-      if (isPromotion) {
-        const options = ["q", "r", "b", "n"]
-        setPromotionModal({ visible: true, from: selectedSquare, to: square, options })
+  const handleSquarePress = useCallback(
+    (square: string) => {
+      // If we have a selected pocket piece, try to drop it
+      if (selectedPocketPiece && possibleDrops.includes(square)) {
+        makeMove({
+          from: "@",
+          to: square,
+          drop: true,
+          piece: selectedPocketPiece,
+        })
+        setSelectedPocketPiece(null)
+        setPossibleDrops([])
         return
       }
 
-      makeMove({ from: selectedSquare, to: square })
-      setSelectedSquare(null)
-      setPossibleMoves([])
-      return
-    }
-
-    // Clear pocket piece selection when selecting board square
-    setSelectedPocketPiece(null)
-    setPossibleDropSquares([])
-
-    const piece = getPieceAt(square)
-    if (isMyTurn && piece && isPieceOwnedByPlayer(piece, playerColor)) {
-      setSelectedSquare(square)
-      requestPossibleMoves(square)
-    } else {
-      setSelectedSquare(null)
-      setPossibleMoves([])
-    }
-  }
-
-  const handlePocketPiecePress = (piece: PocketPiece) => {
-    if (!isMyTurn) return
-
-    // Clear board selection
-    setSelectedSquare(null)
-    setPossibleMoves([])
-
-    if (selectedPocketPiece === piece) {
-      setSelectedPocketPiece(null)
-      setPossibleDropSquares([])
-    } else {
-      setSelectedPocketPiece(piece)
-      requestPossibleDrops(piece)
-    }
-  }
-
-  const handlePromotionSelect = (promotion: string) => {
-    if (promotionModal) {
-      makeMove({ from: promotionModal.from, to: promotionModal.to, promotion })
-      setPromotionModal(null)
-      setSelectedSquare(null)
-      setPossibleMoves([])
-    }
-  }
-
-  const getPieceAt = (square: string): string | null => {
-    const fileIndex = FILES.indexOf(square[0])
-    const rankIndex = RANKS.indexOf(square[1])
-    if (fileIndex === -1 || rankIndex === -1) return null
-
-    const fen = gameState.board.fen || gameState.board.position
-    if (!fen) return null
-
-    const piecePlacement = fen.split(" ")[0]
-    const rows = piecePlacement.split("/")
-    if (rows.length !== 8) return null
-
-    const row = rows[rankIndex]
-    let col = 0
-    for (let i = 0; i < row.length; i++) {
-      const c = row[i]
-      if (c >= "1" && c <= "8") {
-        col += Number.parseInt(c)
-      } else {
-        if (col === fileIndex) {
-          return c
-        }
-        col++
+      // Regular square selection logic
+      if (selectedSquare === square) {
+        setSelectedSquare(null)
+        setPossibleMoves([])
+        return
       }
-    }
-    return null
-  }
 
-  const isPieceOwnedByPlayer = (piece: string, color: "white" | "black"): boolean => {
-    if (color === "white") {
-      return piece === piece.toUpperCase()
-    } else {
-      return piece === piece.toLowerCase()
-    }
-  }
+      if (selectedSquare && possibleMoves.includes(square)) {
+        // Check for promotion
+        const piece = getPieceAt(selectedSquare)
+        const isPromotion =
+          piece &&
+          ((piece.toLowerCase() === "p" && playerColor === "white" && square[1] === "8") ||
+            (piece.toLowerCase() === "p" && playerColor === "black" && square[1] === "1"))
 
-  const formatTime = (milliseconds: number): string => {
-    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0:00"
-    const totalSeconds = Math.floor(milliseconds / 1000)
-    const minutes = Math.floor(totalSeconds / 60)
-    const seconds = totalSeconds % 60
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`
-  }
+        if (isPromotion) {
+          const options = ["q", "r", "b", "n"]
+          setPromotionModal({ visible: true, from: selectedSquare, to: square, options })
+          return
+        }
 
-  const formatPieceTimer = (milliseconds: number): string => {
-    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0.0"
-    const seconds = Math.floor(milliseconds / 100) / 10
-    return seconds.toFixed(1)
-  }
+        makeMove({ from: selectedSquare, to: square })
+        setSelectedSquare(null)
+        setPossibleMoves([])
+        return
+      }
 
-  const calculateMaterialAdvantage = () => {
+      // Select piece if it's player's turn and piece belongs to them
+      const piece = getPieceAt(square)
+      if (isMyTurn && piece && isPieceOwnedByPlayer(piece, playerColor)) {
+        setSelectedSquare(square)
+        setSelectedPocketPiece(null) // Clear pocket selection
+        setPossibleDrops([])
+        requestPossibleMoves(square)
+      } else {
+        setSelectedSquare(null)
+        setPossibleMoves([])
+      }
+    },
+    [
+      selectedPocketPiece,
+      possibleDrops,
+      selectedSquare,
+      possibleMoves,
+      isMyTurn,
+      playerColor,
+      makeMove,
+      getPieceAt,
+      isPieceOwnedByPlayer,
+      requestPossibleMoves,
+    ],
+  )
+
+  const handlePocketPiecePress = useCallback(
+    (piece: string) => {
+      if (!isMyTurn) {
+        Alert.alert("Invalid Action", "It's not your turn to drop pieces.")
+        return
+      }
+      if (!socket?.connected) {
+        Alert.alert("Connection Error", "Not connected to server. Cannot drop piece.")
+        return
+      }
+
+      if (selectedPocketPiece === piece) {
+        // Deselect
+        setSelectedPocketPiece(null)
+        setPossibleDrops([])
+      } else {
+        // Select pocket piece and get possible drops
+        setSelectedPocketPiece(piece)
+        setSelectedSquare(null) // Clear board selection
+        setPossibleMoves([])
+
+        // Request possible drop squares
+        console.log("[DEBUG] Emitting game:getPossibleDrops for piece:", piece)
+        console.log("[DEBUG] Emitting game:getPossibleDrops for piece:", piece)
+        socket.emit("game:getPossibleDrops", { piece })
+      }
+    },
+    [isMyTurn, selectedPocketPiece, socket],
+  )
+
+  // Handle promotion selection
+  const handlePromotionSelect = useCallback(
+    (promotion: string) => {
+      if (promotionModal) {
+        makeMove({
+          from: promotionModal.from,
+          to: promotionModal.to,
+          promotion,
+        })
+        setPromotionModal(null)
+        setSelectedSquare(null)
+        setPossibleMoves([])
+      }
+    },
+    [promotionModal, makeMove],
+  )
+
+  // Calculate material advantage
+  const calculateMaterialAdvantage = useCallback(() => {
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
     let whiteAdvantage = 0
     let blackAdvantage = 0
@@ -1002,129 +1120,313 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
     })
 
     return { white: whiteAdvantage, black: blackAdvantage }
-  }
+  }, [gameState.board.capturedPieces])
 
-  const renderPocketPieces = (color: "white" | "black") => {
-    const pieces = pocketPieceTimers[color] || []
-    if (pieces.length === 0) return null
+  // Render captured pieces
+  const renderCapturedPieces = useCallback(
+    (color: "white" | "black") => {
+      const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
+      const pieces = capturedPieces[color] || []
+      if (pieces.length === 0) return null
 
-    const isMyPocket = color === playerColor
+      const pieceCounts: { [key: string]: number } = {}
+      pieces.forEach((piece) => {
+        const pieceType = color === "white" ? piece.toLowerCase() : piece.toUpperCase()
+        pieceCounts[pieceType] = (pieceCounts[pieceType] || 0) + 1
+      })
+
+      return (
+        <View style={styles.capturedPieces}>
+          {Object.entries(pieceCounts).map(([piece, count]) => (
+            <View key={piece} style={styles.capturedPieceGroup}>
+              <Text style={styles.capturedPiece}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>
+              {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
+            </View>
+          ))}
+        </View>
+      )
+    },
+    [gameState.board.capturedPieces],
+  )
+
+  // Render pocket panel
+  const renderPocketPanel = useCallback(
+    (color: "white" | "black") => {
+      const pocketPieces = gameState.board.pocketPanel?.[color] || gameState.gameState?.pocketPanel?.[color] || []
+      const pocketTimers = isWithTimerVariant() ? localPocketTimers[color] || [] : []
+
+      if (pocketPieces.length === 0) {
+        return (
+          <View style={[styles.pocketPanel, { width: pocketPanelWidth }]}>
+            <Text style={styles.pocketTitle}>
+              {color === "white" ? "♔" : "♚"} {color.toUpperCase()}
+            </Text>
+            <Text style={styles.emptyPocketText}>No pieces</Text>
+          </View>
+        )
+      }
+
+      // Group pieces by type
+      const pieceCounts: { [key: string]: number } = {}
+      pocketPieces.forEach((piece) => {
+        pieceCounts[piece] = (pieceCounts[piece] || 0) + 1
+      })
+
+      return (
+        <View style={[styles.pocketPanel, { width: pocketPanelWidth }]}>
+          <Text style={styles.pocketTitle}>
+            {color === "white" ? "♔" : "♚"} {color.toUpperCase()}
+          </Text>
+          <ScrollView style={styles.pocketScroll} showsVerticalScrollIndicator={false}>
+            {Object.entries(pieceCounts).map(([piece, count]) => {
+              const pieceSymbol =
+                color === "white"
+                  ? PIECE_SYMBOLS[piece.toUpperCase() as keyof typeof PIECE_SYMBOLS]
+                  : PIECE_SYMBOLS[piece.toLowerCase() as keyof typeof PIECE_SYMBOLS]
+
+              // Find timer for this piece (if withTimer variant)
+              const timer = pocketTimers.find((t) => t.piece === piece)
+              const isSelected = selectedPocketPiece === piece
+              const canSelect = isMyTurn && playerColor === color
+
+              return (
+                <TouchableOpacity
+                  key={piece}
+                  onPress={() => canSelect && handlePocketPiecePress(piece)}
+                  disabled={!canSelect}
+                  style={[
+                    styles.pocketPiece,
+                    isSelected && styles.selectedPocketPiece,
+                    !canSelect && styles.disabledPocketPiece,
+                  ]}
+                >
+                  <Text style={styles.pocketPieceSymbol}>{pieceSymbol}</Text>
+                  {count > 1 && (
+                    <View style={styles.pocketPieceCount}>
+                      <Text style={styles.pocketPieceCountText}>{count}</Text>
+                    </View>
+                  )}
+                  {timer && isWithTimerVariant() && (
+                    <View style={styles.pocketTimer}>
+                      <Text style={styles.pocketTimerText}>{formatPocketTime(timer.remainingTime)}s</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )
+            })}
+          </ScrollView>
+          {isWithTimerVariant() && <Text style={styles.timerWarning}>⏱️ 10s limit</Text>}
+        </View>
+      )
+    },
+    [
+      gameState.board.pocketPanel,
+      gameState.gameState?.pocketPanel,
+      localPocketTimers,
+      isWithTimerVariant,
+      selectedPocketPiece,
+      isMyTurn,
+      playerColor,
+      handlePocketPiecePress,
+      formatPocketTime,
+      pocketPanelWidth,
+    ],
+  )
+
+  // Render square
+  const renderSquare = useCallback(
+    (file: string, rank: string) => {
+      const square = `${file}${rank}`
+      const isLight = (FILES.indexOf(file) + Number.parseInt(rank)) % 2 === 0
+      const isSelected = selectedSquare === square
+      const isPossibleMove = possibleMoves.includes(square)
+      const isPossibleDrop = possibleDrops.includes(square)
+
+      console.log(
+        `Square ${square}: isSelected=${isSelected}, isPossibleMove=${isPossibleMove}, isPossibleDrop=${isPossibleDrop}, possibleMoves=${JSON.stringify(possibleMoves)}`,
+      )
+
+      // Check for last move highlighting
+      let lastMoveObj = null
+      if (gameState.board && Array.isArray(gameState.board.moveHistory) && gameState.board.moveHistory.length > 0) {
+        lastMoveObj = gameState.board.moveHistory[gameState.board.moveHistory.length - 1]
+      } else if (
+        gameState.lastMove &&
+        typeof gameState.lastMove === "object" &&
+        gameState.lastMove.from &&
+        gameState.lastMove.to
+      ) {
+        lastMoveObj = gameState.lastMove
+      }
+
+      let isLastMove = false
+      if (lastMoveObj && lastMoveObj.from && lastMoveObj.to) {
+        isLastMove = lastMoveObj.from === square || lastMoveObj.to === square
+      }
+
+      const piece = getPieceAt(square)
+
+      // Determine border styling
+      let borderColor = "transparent"
+      let borderWidth = 0
+
+      if (isPossibleDrop) {
+        borderColor = "#a855f7" // Purple for drops
+        borderWidth = 3
+      } else if (isPossibleMove) {
+        borderColor = "#4ade80" // Green for moves
+        borderWidth = 3
+      } else if (isSelected) {
+        borderColor = "#60a5fa" // Blue for selected
+        borderWidth = 3
+      } else if (isLastMove) {
+        borderColor = "rgba(251, 191, 36, 0.7)" // Yellow for last move, slightly transparent
+        borderWidth = 2
+      }
+
+      return (
+        <TouchableOpacity
+          key={square}
+          onPress={() => handleSquarePress(square)}
+          style={[
+            styles.square,
+            {
+              width: squareSize,
+              height: squareSize,
+              backgroundColor: isLight ? "#F0D9B5" : "#B58863",
+              borderColor,
+              borderWidth,
+            },
+          ]}
+        >
+          {/* Coordinate labels */}
+          {file === "a" && (
+            <Text style={[styles.coordinateLabel, styles.rankLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
+              {rank}
+            </Text>
+          )}
+          {rank === "1" && (
+            <Text style={[styles.coordinateLabel, styles.fileLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
+              {file}
+            </Text>
+          )}
+
+          {/* Piece */}
+          {piece && (
+            <Text
+              style={[
+                styles.piece,
+                {
+                  fontSize: Math.min(squareSize * 0.7, isTablet ? 32 : isSmallScreen ? 20 : 24),
+                },
+              ]}
+            >
+              {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
+            </Text>
+          )}
+
+          {/* Move indicators */}
+          {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
+          {isPossibleMove && piece && <View style={styles.captureIndicator} />}
+          {isPossibleDrop && <View style={styles.dropIndicator} />}
+        </TouchableOpacity>
+      )
+    },
+    [
+      selectedSquare,
+      possibleMoves,
+      possibleDrops,
+      gameState.board,
+      gameState.lastMove,
+      getPieceAt,
+      handleSquarePress,
+      squareSize,
+      isTablet,
+      isSmallScreen,
+    ],
+  )
+
+  // Render board
+  const renderBoard = useCallback(() => {
+    const files = boardFlipped ? [...FILES].reverse() : FILES
+    const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
-      <View style={styles.pocketContainer}>
-        <Text style={styles.pocketTitle}>
-          {color === "white" ? "♔" : "♚"} Pocket ({pieces.length})
-        </Text>
-        <View style={styles.pocketPieces}>
-          {pieces.map((piece, index) => {
-            const isSelected = selectedPocketPiece === piece
-            const pieceSymbol =
-              PIECE_SYMBOLS[
-                (color === "white" ? piece.type.toUpperCase() : piece.type.toLowerCase()) as keyof typeof PIECE_SYMBOLS
-              ]
-
-            return (
-              <TouchableOpacity
-                key={`${piece.type}-${index}`}
-                style={[
-                  styles.pocketPiece,
-                  isSelected && styles.selectedPocketPiece,
-                  !isMyPocket && styles.disabledPocketPiece,
-                ]}
-                onPress={() => isMyPocket && handlePocketPiecePress(piece)}
-                disabled={!isMyPocket || !isMyTurn}
-              >
-                <Text style={styles.pocketPieceText}>{pieceSymbol}</Text>
-                {isTimerVariant && piece.timeRemaining !== undefined && (
-                  <Text style={[styles.pieceTimer, piece.timeRemaining < 3000 && styles.pieceTimerUrgent]}>
-                    {formatPieceTimer(piece.timeRemaining)}s
-                  </Text>
-                )}
-              </TouchableOpacity>
-            )
-          })}
+      <View style={[styles.boardContainer, { width: boardSize, height: boardSize }]}>
+        <View style={styles.board}>
+          {ranks.map((rank) => (
+            <View key={rank} style={styles.row}>
+              {files.map((file) => renderSquare(file, rank))}
+            </View>
+          ))}
         </View>
       </View>
     )
-  }
+  }, [boardFlipped, renderSquare, boardSize])
 
-  const renderSquare = (file: string, rank: string) => {
-    const square = `${file}${rank}`
-    const isLight = (FILES.indexOf(file) + Number.parseInt(rank)) % 2 === 0
-    const isSelected = selectedSquare === square
-    const isPossibleMove = possibleMoves.includes(square)
-    const isPossibleDrop = possibleDropSquares.includes(square)
+  // Render player info
+  const renderPlayerInfo = useCallback(
+    (color: "white" | "black") => {
+      const player = gameState.players[color]
+      if (!player) {
+        return (
+          <View style={styles.playerInfoContainer}>
+            <Text style={styles.playerName}>Unknown Player</Text>
+          </View>
+        )
+      }
 
-    let lastMoveObj = null
-    if (gameState.board && Array.isArray(gameState.board.moveHistory) && gameState.board.moveHistory.length > 0) {
-      lastMoveObj = gameState.board.moveHistory[gameState.board.moveHistory.length - 1]
-    } else if (
-      gameState.lastMove &&
-      typeof gameState.lastMove === "object" &&
-      gameState.lastMove.from &&
-      gameState.lastMove.to
-    ) {
-      lastMoveObj = gameState.lastMove
-    }
+      const timer = safeTimerValue(localTimers[color])
+      const isActive = gameState.board.activeColor === color && gameState.status === "active"
+      const isMe = playerColor === color
+      const materialAdvantage = calculateMaterialAdvantage()
+      const advantage = materialAdvantage[color] - materialAdvantage[color === "white" ? "black" : "white"]
 
-    let isLastMove = false
-    if (lastMoveObj && lastMoveObj.from && lastMoveObj.to) {
-      isLastMove = lastMoveObj.from === square || lastMoveObj.to === square
-    }
+      return (
+        <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
+          <View style={styles.playerHeader}>
+            <View style={styles.playerDetails}>
+              <View style={styles.playerNameRow}>
+                <Text
+                  style={[
+                    styles.playerColorIndicator,
+                    {
+                      color: color === "white" ? "#fff" : "#000",
+                      backgroundColor: color === "white" ? "#000" : "#fff",
+                    },
+                  ]}
+                >
+                  {color === "white" ? "♔" : "♚"}
+                </Text>
+                <Text style={[styles.playerName, isActive && styles.activePlayerName]}>{player.username}</Text>
+                {isMe && <Text style={styles.youIndicator}>(You)</Text>}
+              </View>
+              <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
+              {advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
+            </View>
+            <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
+              <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
+            </View>
+          </View>
+          {renderCapturedPieces(color)}
+          {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
+        </View>
+      )
+    },
+    [
+      gameState.players,
+      gameState.board.activeColor,
+      gameState.status,
+      playerColor,
+      localTimers,
+      calculateMaterialAdvantage,
+      formatTime,
+      renderCapturedPieces,
+    ],
+  )
 
-    const piece = getPieceAt(square)
-
-    return (
-      <TouchableOpacity
-        key={square}
-        style={[
-          styles.square,
-          {
-            width: squareSize,
-            height: squareSize,
-            backgroundColor: isLight ? "#F0D9B5" : "#B58863",
-            borderWidth: isPossibleMove || isPossibleDrop ? 3 : isSelected ? 3 : isLastMove ? 2 : 0,
-            borderColor:
-              isPossibleMove || isPossibleDrop
-                ? "#4ade80"
-                : isSelected
-                  ? "#60a5fa"
-                  : isLastMove
-                    ? "#fbbf24"
-                    : "transparent",
-          },
-        ]}
-        onPress={() => handleSquarePress(square)}
-      >
-        {file === "a" && (
-          <Text style={[styles.coordinateLabel, styles.rankLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
-            {rank}
-          </Text>
-        )}
-        {rank === "1" && (
-          <Text style={[styles.coordinateLabel, styles.fileLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
-            {file}
-          </Text>
-        )}
-        {piece && (
-          <Text
-            style={[
-              styles.piece,
-              {
-                fontSize: Math.min(squareSize * 0.7, isTablet ? 40 : isSmallScreen ? 24 : 32),
-              },
-            ]}
-          >
-            {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
-          </Text>
-        )}
-        {(isPossibleMove || isPossibleDrop) && !piece && <View style={styles.possibleMoveDot} />}
-        {(isPossibleMove || isPossibleDrop) && piece && <View style={styles.captureIndicator} />}
-      </TouchableOpacity>
-    )
-  }
-
-  const renderGameInfo = () => {
+  // Update the renderGameInfo function to show connection status:
+  const renderGameInfo = useCallback(() => {
     const gs = gameState.gameState || {}
 
     if (gameState.status === "ended" || gs.gameEnded) {
@@ -1137,134 +1439,55 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
 
     const activePlayerName = gameState.players[gameState.board.activeColor]?.username || gameState.board.activeColor
     const isMyTurnActive = gameState.board.activeColor === playerColor
+    const variantDisplay = isWithTimerVariant() ? "Crazyhouse (Timer)" : "Crazyhouse"
 
     return (
       <View style={styles.gameStatusContainer}>
+        {!socketConnected && <Text style={styles.connectionStatus}>🔴 Disconnected</Text>}
+        {socketConnected && <Text style={styles.connectionStatus}>🟢 Connected</Text>}
         <Text style={[styles.turnIndicator, isMyTurnActive && styles.myTurnIndicator]}>
           {isMyTurnActive ? "🎯 Your Turn" : `⏳ ${activePlayerName}'s Turn`}
         </Text>
-        {isTimerVariant && <Text style={styles.variantIndicator}>⏱️ Timer Variant</Text>}
+        <Text style={styles.variantName}>⚡ {variantDisplay}</Text>
       </View>
     )
-  }
+  }, [
+    gameState.status,
+    gameState.gameState,
+    gameState.players,
+    gameState.board.activeColor,
+    playerColor,
+    isWithTimerVariant,
+    socketConnected,
+  ])
 
-  const renderBoard = () => {
-    const files = boardFlipped ? [...FILES].reverse() : FILES
-    const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
-
-    return (
-      <View style={styles.boardContainer}>
-        <View style={styles.board}>
-          {ranks.map((rank) => (
-            <View key={rank} style={styles.row}>
-              {files.map((file) => renderSquare(file, rank))}
-            </View>
-          ))}
-        </View>
-      </View>
-    )
-  }
-
-  const renderPlayerInfo = (color: "white" | "black") => {
-    const player = gameState.players[color]
-    if (!player) {
-      return (
-        <View style={styles.playerInfoContainer}>
-          <Text style={styles.playerName}>Unknown Player</Text>
-        </View>
-      )
-    }
-
-    const timer = safeTimerValue(localTimers[color])
-    const isActive = gameState.board.activeColor === color && gameState.status === "active"
-    const isMe = playerColor === color
-    const materialAdvantage = calculateMaterialAdvantage()
-    const advantage = materialAdvantage[color] - materialAdvantage[color === "white" ? "black" : "white"]
-
-    return (
-      <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
-        <View style={styles.playerHeader}>
-          <View style={styles.playerDetails}>
-            <View style={styles.playerNameRow}>
-              <Text
-                style={[
-                  styles.playerColorIndicator,
-                  { color: color === "white" ? "#fff" : "#000", backgroundColor: color === "white" ? "#000" : "#fff" },
-                ]}
-              >
-                {color === "white" ? "♔" : "♚"}
-              </Text>
-              <Text style={[styles.playerName, isActive && styles.activePlayerName]}>{player.username}</Text>
-              {isMe && <Text style={styles.youIndicator}>(You)</Text>}
-            </View>
-            <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
-            {advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
-          </View>
-          <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
-            <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
-          </View>
-        </View>
-        {renderPocketPieces(color)}
-        {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
-      </View>
-    )
-  }
-
-  const renderMoveHistory = () => {
-    if (!showMoveHistory) return null
-
-    const moves = moveHistory
-    const movePairs = []
-    for (let i = 0; i < moves.length; i += 2) {
-      movePairs.push({
-        moveNumber: Math.floor(i / 2) + 1,
-        white: moves[i],
-        black: moves[i + 1] || "",
-      })
-    }
-
-    return (
-      <Modal visible={showMoveHistory} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.moveHistoryModal}>
-            <View style={styles.moveHistoryHeader}>
-              <Text style={styles.moveHistoryTitle}>📜 Move History</Text>
-              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.moveHistoryScroll}>
-              {movePairs.map((pair, index) => (
-                <View key={index} style={styles.moveRow}>
-                  <Text style={styles.moveNumber}>{pair.moveNumber}.</Text>
-                  <Text style={styles.moveText}>{pair.white}</Text>
-                  <Text style={styles.moveText}>{pair.black}</Text>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    )
-  }
-
-  const handleFlipBoard = () => {
+  const handleFlipBoard = useCallback(() => {
     setBoardFlipped(!boardFlipped)
-  }
+  }, [boardFlipped])
 
+  // Determine player positions
   const topPlayerColor = boardFlipped ? playerColor : playerColor === "white" ? "black" : "white"
   const bottomPlayerColor = boardFlipped ? (playerColor === "white" ? "black" : "white") : playerColor
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <View style={styles.container}>
       {/* Top Player */}
       {renderPlayerInfo(topPlayerColor)}
 
       {/* Game Status */}
       {renderGameInfo()}
 
-      {/* Chess Board */}
-      {renderBoard()}
+      {/* Main Game Area */}
+      <View style={styles.gameArea}>
+        {/* Chess Board */}
+        {renderBoard()}
+
+        {/* Pocket Panels */}
+        <View style={styles.pocketContainer}>
+          {renderPocketPanel(topPlayerColor)}
+          {renderPocketPanel(bottomPlayerColor)}
+        </View>
+      </View>
 
       {/* Bottom Player */}
       {renderPlayerInfo(bottomPlayerColor)}
@@ -1285,305 +1508,102 @@ export default function CrazyHouse({ initialGameState, userId, subvariant, onNav
       </View>
 
       {/* Move History Modal */}
-      {renderMoveHistory()}
-
-      {/* Game End Modal */}
-      <Modal visible={showGameEndModal} transparent animationType="fade" onRequestClose={() => {}}>
+      <Modal visible={showMoveHistory} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.gameEndModal,
-              isWinner === true && styles.victoryModal,
-              isWinner === false && styles.defeatModal,
-            ]}
-          >
-            <Text
-              style={[
-                styles.gameEndTitle,
-                isWinner === true && styles.victoryTitle,
-                isWinner === false && styles.defeatTitle,
-              ]}
-            >
-              {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
-            </Text>
-            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
-            {(gameEndDetails.reason || gameEndDetails.moveSan || gameEndDetails.winner) && (
-              <View style={{ marginBottom: 16, marginTop: -10 }}>
-                {gameEndDetails.reason && (
-                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
-                    Reason: {gameEndDetails.reason}
-                  </Text>
-                )}
-                {gameEndDetails.moveSan && (
-                  <Text style={{ color: "#94a3b8", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
-                    Move: {gameEndDetails.moveSan}
-                    {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ""}
-                  </Text>
-                )}
-                {gameEndDetails.winner && (
-                  <Text style={{ color: "#4ade80", fontSize: 16, textAlign: "center", marginBottom: 2 }}>
-                    Winner: {gameEndDetails.winner}
-                    {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ""}
-                  </Text>
-                )}
-              </View>
-            )}
+          <View style={styles.moveHistoryModal}>
+            <View style={styles.moveHistoryHeader}>
+              <Text style={styles.moveHistoryTitle}>📜 Move History</Text>
+              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.moveHistoryScroll}>
+              {moveHistory.length === 0 ? (
+                <Text style={styles.emptyHistoryText}>No moves yet</Text>
+              ) : (
+                moveHistory.map((move, index) => (
+                  <View key={index} style={styles.moveRow}>
+                    <Text style={styles.moveNumber}>{Math.floor(index / 2) + 1}.</Text>
+                    <Text style={styles.moveText}>{move}</Text>
+                  </View>
+                ))
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
 
       {/* Promotion Modal */}
-      <Modal
-        visible={!!promotionModal && promotionModal.visible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPromotionModal(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.promotionModal}>
-            <Text style={styles.promotionTitle}>👑 Choose Promotion Piece</Text>
-            <View style={styles.promotionOptions}>
-              {promotionModal &&
-                promotionModal.options.map((p) => (
-                  <TouchableOpacity key={p} style={styles.promotionOption} onPress={() => handlePromotionSelect(p)}>
+      {promotionModal && (
+        <Modal visible={promotionModal.visible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.promotionModal}>
+              <Text style={styles.promotionTitle}>Choose Promotion</Text>
+              <View style={styles.promotionOptions}>
+                {promotionModal.options.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={styles.promotionOption}
+                    onPress={() => handlePromotionSelect(option)}
+                  >
                     <Text style={styles.promotionPiece}>
                       {
                         PIECE_SYMBOLS[
-                          (playerColor === "white" ? p.toUpperCase() : p.toLowerCase()) as keyof typeof PIECE_SYMBOLS
+                          (playerColor === "white" ? option.toUpperCase() : option) as keyof typeof PIECE_SYMBOLS
                         ]
                       }
                     </Text>
                   </TouchableOpacity>
                 ))}
+              </View>
             </View>
-            <TouchableOpacity onPress={() => setPromotionModal(null)} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+          </View>
+        </Modal>
+      )}
+
+      {/* Game End Modal */}
+      <Modal visible={showGameEndModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.gameEndModal}>
+            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
+            {gameEndDetails.reason && <Text style={styles.gameEndReason}>Reason: {gameEndDetails.reason}</Text>}
+            {gameEndDetails.moveSan && (
+              <Text style={styles.gameEndMove}>
+                Move: {gameEndDetails.moveSan} by {gameEndDetails.moveMaker}
+              </Text>
+            )}
+            {gameEndDetails.winnerName && <Text style={styles.gameEndWinner}>Winner: {gameEndDetails.winnerName}</Text>}
+            <TouchableOpacity style={styles.menuButton} onPress={navigateToMenu}>
+              <Text style={styles.menuButtonText}>Back to Menu</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1a1a2e",
-  },
-  contentContainer: {
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: "#242424",
     padding: 16,
-    minHeight: 300,
+    paddingTop: 40,
   },
-  playerInfoContainer: {
-    width: "100%",
-    maxWidth: 500,
-    backgroundColor: "#16213e",
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    borderWidth: 2,
-    borderColor: "#0f3460",
-    minHeight: 80,
-  },
-  activePlayerContainer: {
-    borderColor: "#4ade80",
-    backgroundColor: "#1e3a2e",
-    shadowColor: "#4ade80",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  playerHeader: {
+  gameArea: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
-    minHeight: 44,
-  },
-  playerDetails: {
-    flex: 1,
-    marginRight: 12,
-  },
-  playerNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-    flexWrap: "wrap",
-  },
-  playerColorIndicator: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    minWidth: 35.2,
-    textAlign: "center",
-  },
-  playerName: {
-    color: "#e2e8f0",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginRight: 12,
-    flexShrink: 1,
-  },
-  activePlayerName: {
-    color: "#4ade80",
-  },
-  youIndicator: {
-    color: "#60a5fa",
-    fontSize: 14,
-    fontStyle: "italic",
-  },
-  playerRating: {
-    color: "#94a3b8",
-    fontSize: 14,
-    marginBottom: 6,
-  },
-  materialAdvantage: {
-    color: "#4ade80",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  timerContainer: {
-    backgroundColor: "#0f172a",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-    minWidth: 120,
-    minHeight: 44,
     justifyContent: "center",
-    alignItems: "center",
-  },
-  activeTimerContainer: {
-    backgroundColor: "#4ade80",
-    borderColor: "#4ade80",
-  },
-  timerText: {
-    color: "#e2e8f0",
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  activeTimerText: {
-    color: "#000",
-  },
-  pocketContainer: {
-    marginTop: 12,
-    padding: 8,
-    backgroundColor: "#0f172a",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-  pocketTitle: {
-    color: "#e2e8f0",
-    fontSize: 14,
-    fontWeight: "bold",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  pocketPieces: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 8,
-  },
-  pocketPiece: {
-    width: 50,
-    height: 50,
-    backgroundColor: "#374151",
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#4b5563",
-    justifyContent: "center",
-    alignItems: "center",
-    margin: 2,
-  },
-  selectedPocketPiece: {
-    borderColor: "#60a5fa",
-    backgroundColor: "#1e3a8a",
-  },
-  disabledPocketPiece: {
-    opacity: 0.6,
-  },
-  pocketPieceText: {
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-  pieceTimer: {
-    position: "absolute",
-    bottom: 2,
-    right: 2,
-    fontSize: 10,
-    color: "#4ade80",
-    fontWeight: "bold",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    paddingHorizontal: 2,
-    borderRadius: 2,
-  },
-  pieceTimerUrgent: {
-    color: "#ef4444",
-  },
-  yourTurnIndicator: {
-    color: "#4ade80",
-    fontSize: 14,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginTop: 8,
-  },
-  gameStatusContainer: {
-    alignItems: "center",
     marginVertical: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: "#16213e",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#0f3460",
-    maxWidth: "90%",
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  turnIndicator: {
-    color: "#e2e8f0",
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  myTurnIndicator: {
-    color: "#4ade80",
-  },
-  variantIndicator: {
-    color: "#94a3b8",
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  gameOverText: {
-    color: "#94a3b8",
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
   },
   boardContainer: {
-    alignItems: "center",
-    marginVertical: 16,
-    width: "100%",
+    backgroundColor: "#8B4513",
+    padding: 4,
+    borderRadius: 8,
+    marginRight: 16,
   },
   board: {
-    borderWidth: 3,
-    borderColor: "#8b5a2b",
-    borderRadius: 8,
-    backgroundColor: "#8b5a2b",
-    padding: 6,
-    width: 328,
-    height: 328,
+    flexDirection: "column",
   },
   row: {
     flexDirection: "row",
@@ -1592,224 +1612,394 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     position: "relative",
-    minHeight: 35.2,
-    minWidth: 35.2,
+  },
+  piece: {
+    textAlign: "center",
+    fontWeight: "bold",
   },
   coordinateLabel: {
     position: "absolute",
-    fontSize: 12,
+    fontSize: 8,
     fontWeight: "bold",
   },
   rankLabel: {
-    top: 3,
-    left: 3,
+    left: 2,
+    top: 2,
   },
   fileLabel: {
-    bottom: 3,
-    right: 3,
-  },
-  piece: {
-    fontWeight: "bold",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    right: 2,
+    bottom: 2,
   },
   possibleMoveDot: {
     position: "absolute",
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: "#4ade80",
-    opacity: 0.8,
   },
   captureIndicator: {
     position: "absolute",
-    top: 0,
-    right: 0,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 16,
-    borderTopWidth: 16,
-    borderLeftColor: "transparent",
-    borderTopColor: "#ef4444",
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#ef4444",
+    top: 2,
+    right: 2,
   },
-  controlsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  dropIndicator: {
+    position: "absolute",
+    inset: 2,
+    borderRadius: 4,
+    backgroundColor: "rgba(168, 85, 247, 0.3)",
+    borderWidth: 2,
+    borderColor: "#a855f7",
+  },
+  pocketContainer: {
+    flexDirection: "column",
+    gap: 16,
+  },
+  pocketPanel: {
+    backgroundColor: "#333",
+    borderRadius: 8,
+    padding: 8,
+    minHeight: 120,
+  },
+  pocketTitle: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  pocketScroll: {
+    flex: 1,
+  },
+  pocketPiece: {
+    backgroundColor: "#555",
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 6,
     alignItems: "center",
-    width: "100%",
-    maxWidth: 500,
-    marginTop: 16,
-    paddingHorizontal: 8,
+    position: "relative",
+    borderWidth: 2,
+    borderColor: "transparent",
   },
-  historyButton: {
-    backgroundColor: "#16213e",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#0f3460",
-    minHeight: 44,
+  selectedPocketPiece: {
+    borderColor: "#60a5fa",
+    backgroundColor: "#1e40af",
+  },
+  disabledPocketPiece: {
+    opacity: 0.5,
+  },
+  pocketPieceSymbol: {
+    fontSize: 20,
+    color: "#fff",
+  },
+  pocketPieceCount: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: "#60a5fa",
+    borderRadius: 8,
+    width: 16,
+    height: 16,
     justifyContent: "center",
     alignItems: "center",
   },
-  historyButtonText: {
-    color: "#e2e8f0",
+  pocketPieceCountText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  pocketTimer: {
+    position: "absolute",
+    bottom: -4,
+    left: "50%",
+    transform: [{ translateX: -12 }],
+    backgroundColor: "#f97316",
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  pocketTimerText: {
+    color: "#fff",
+    fontSize: 8,
+    fontWeight: "bold",
+  },
+  timerWarning: {
+    color: "#f97316",
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  emptyPocketText: {
+    color: "#666",
+    fontSize: 10,
+    textAlign: "center",
+    fontStyle: "italic",
+  },
+  playerInfoContainer: {
+    backgroundColor: "#333",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  activePlayerContainer: {
+    borderColor: "#4ade80",
+    backgroundColor: "#1f2937",
+  },
+  playerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  playerDetails: {
+    flex: 1,
+  },
+  playerNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  playerColorIndicator: {
     fontSize: 16,
+    marginRight: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    textAlign: "center",
+    lineHeight: 24,
+  },
+  playerName: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  activePlayerName: {
+    color: "#4ade80",
+  },
+  youIndicator: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  playerRating: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  materialAdvantage: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginTop: 2,
+  },
+  timerContainer: {
+    backgroundColor: "#555",
+    padding: 8,
+    borderRadius: 6,
+  },
+  activeTimerContainer: {
+    backgroundColor: "#4ade80",
+  },
+  timerText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  activeTimerText: {
+    color: "#000",
+  },
+  capturedPieces: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8,
+  },
+  capturedPieceGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  capturedPiece: {
+    fontSize: 14,
+    color: "#a1a1aa",
+  },
+  capturedCount: {
+    color: "#a1a1aa",
+    fontSize: 10,
+    marginLeft: 2,
+  },
+  yourTurnIndicator: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  gameStatusContainer: {
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  gameOverText: {
+    color: "#ef4444",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  turnIndicator: {
+    color: "#a1a1aa",
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  myTurnIndicator: {
+    color: "#4ade80",
+  },
+  variantName: {
+    color: "#60a5fa",
+    fontSize: 12,
+  },
+  controlsContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 16,
+    gap: 8,
+  },
+  historyButton: {
+    backgroundColor: "#60a5fa",
+    padding: 8,
+    borderRadius: 6,
+  },
+  historyButtonText: {
+    color: "#fff",
+    fontSize: 12,
     fontWeight: "bold",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 16,
   },
   moveHistoryModal: {
-    backgroundColor: "#16213e",
-    borderRadius: 12,
-    width: "95%",
-    maxWidth: 500,
-    maxHeight: "80%",
-    borderWidth: 2,
-    borderColor: "#0f3460",
+    backgroundColor: "#333",
+    borderRadius: 8,
+    padding: 16,
+    width: "80%",
+    maxHeight: "60%",
   },
   moveHistoryHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#0f3460",
-    minHeight: 64,
+    marginBottom: 16,
   },
   moveHistoryTitle: {
-    color: "#e2e8f0",
-    fontSize: 20,
+    color: "#fff",
+    fontSize: 16,
     fontWeight: "bold",
-    textAlign: "center",
   },
   closeButton: {
-    padding: 12,
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: "#ef4444",
+    padding: 8,
+    borderRadius: 4,
   },
   closeButtonText: {
-    color: "#94a3b8",
-    fontSize: 20,
-    fontWeight: "bold",
+    color: "#fff",
+    fontSize: 12,
   },
   moveHistoryScroll: {
-    flex: 1,
-    padding: 20,
+    maxHeight: 200,
+  },
+  emptyHistoryText: {
+    color: "#666",
+    textAlign: "center",
+    fontStyle: "italic",
   },
   moveRow: {
     flexDirection: "row",
-    marginBottom: 12,
-    paddingVertical: 6,
     alignItems: "center",
+    marginBottom: 4,
   },
   moveNumber: {
-    color: "#94a3b8",
-    fontSize: 16,
-    width: 40,
-    fontWeight: "bold",
+    color: "#a1a1aa",
+    fontSize: 12,
+    width: 30,
   },
   moveText: {
-    color: "#e2e8f0",
-    fontSize: 16,
-    width: 80,
-    marginHorizontal: 12,
-  },
-  gameEndModal: {
-    backgroundColor: "#16213e",
-    borderRadius: 16,
-    padding: 32,
-    alignItems: "center",
-    borderWidth: 3,
-    borderColor: "#0f3460",
-    maxWidth: "90%",
-    minWidth: 300,
-  },
-  victoryModal: {
-    borderColor: "#4ade80",
-    backgroundColor: "#1e3a2e",
-  },
-  defeatModal: {
-    borderColor: "#ef4444",
-    backgroundColor: "#3a1e1e",
-  },
-  gameEndTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 20,
-    color: "#e2e8f0",
-  },
-  victoryTitle: {
-    color: "#4ade80",
-  },
-  defeatTitle: {
-    color: "#ef4444",
-  },
-  gameEndMessage: {
-    fontSize: 18,
-    textAlign: "center",
-    marginBottom: 30,
-    color: "#e2e8f0",
-    lineHeight: 24,
+    color: "#fff",
+    fontSize: 12,
   },
   promotionModal: {
-    backgroundColor: "#16213e",
-    borderRadius: 12,
-    padding: 24,
+    backgroundColor: "#333",
+    borderRadius: 8,
+    padding: 16,
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#0f3460",
-    maxWidth: "90%",
   },
   promotionTitle: {
-    color: "#e2e8f0",
-    fontSize: 20,
+    color: "#fff",
+    fontSize: 16,
     fontWeight: "bold",
-    marginBottom: 24,
-    textAlign: "center",
+    marginBottom: 16,
   },
   promotionOptions: {
     flexDirection: "row",
-    justifyContent: "center",
-    marginBottom: 24,
-    flexWrap: "wrap",
+    gap: 16,
   },
   promotionOption: {
-    margin: 12,
-    padding: 16,
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#334155",
-    minWidth: 54,
-    minHeight: 54,
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: "#60a5fa",
+    padding: 12,
+    borderRadius: 8,
   },
   promotionPiece: {
-    fontSize: 32,
-    textAlign: "center",
+    fontSize: 24,
+    color: "#fff",
   },
-  cancelButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    backgroundColor: "#374151",
-    borderRadius: 10,
-    minHeight: 44,
-    justifyContent: "center",
+  gameEndModal: {
+    backgroundColor: "#333",
+    borderRadius: 8,
+    padding: 16,
     alignItems: "center",
+    width: "80%",
   },
-  cancelButtonText: {
-    color: "#94a3b8",
-    fontSize: 18,
+  gameEndMessage: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  gameEndReason: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  gameEndMove: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  gameEndWinner: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginBottom: 16,
+  },
+  menuButton: {
+    backgroundColor: "#60a5fa",
+    padding: 12,
+    borderRadius: 8,
+  },
+  menuButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  connectionStatus: {
+    fontSize: 12,
+    fontWeight: "bold",
+    marginBottom: 4,
+    color: "#fff", // Default color, will be overridden by red/green
   },
 })

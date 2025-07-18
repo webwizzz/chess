@@ -19,7 +19,7 @@ interface Player {
 interface GameState {
   sessionId: string
   variantName: string
-  subvariantName: string
+  subvariantName?: string
   description: string
   players: {
     white: Player

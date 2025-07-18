@@ -4,8 +4,10 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
+  Image,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -15,7 +17,7 @@ import {
 } from "react-native";
 
 export default function Choose() {
-  const { width } = Dimensions.get("window");
+  const { width, height } = Dimensions.get("window");
   const router = useRouter();
   const cardWidth = width > 400 ? 360 : width - 40;
 
@@ -65,7 +67,7 @@ export default function Choose() {
         }
       } catch (err) {
         console.error("Error initializing user:", err);
-        alert("Connection failed!");
+        Alert.alert("Error", "Failed to load user data."); // Use Alert
         setUserName("Guest"); // Default on error
         setUserEmail("No email");
       }
@@ -85,27 +87,88 @@ export default function Choose() {
   const closeSidebar = () => setIsSidebarOpen(false);
 
   const handleVariantSelect = async (variant: string) => {
-    if (!userId) return;
+    if (!userId) {
+      Alert.alert("Login Required", "Please log in to play games.");
+      return;
+    }
+
+    // Connect to matchmaking socket and join queue for regular games
+    setSocketConnecting(true);
+    const socketInstance = getSocket(userId, "matchmaking"); // Ensure this gets the shared instance
+
+    socketInstance.connect(); // Ensure connection attempt
+
+    const onConnectSuccess = () => {
+      console.log("Matchmaking socket connected for variant select.");
+
+      socketInstance.off("connect", onConnectSuccess);
+      socketInstance.off("connect_error", onConnectError); 
+      socketInstance.emit("tournament:join", { userId });
+      
+      // Navigate to matchmaking screen, which will then emit queue:join
+      // The variant and userId are passed as params to MatchMaking.tsx
+      router.replace({ pathname: "/matchmaking", params: { variant, userId } });
+      setSocketConnecting(false);
+    };
+
+    const onConnectError = (error: Error) => {
+      console.error("Matchmaking socket connection error:", error);
+      Alert.alert("Connection Failed", "Failed to connect to the game server. Please try again.");
+      socketInstance.off("connect", onConnectSuccess);
+      socketInstance.off("connect_error", onConnectError);
+      setSocketConnecting(false);
+    };
+
+    socketInstance.on("connect", onConnectSuccess);
+    socketInstance.on("connect_error", onConnectError);
+
+    // For classic and crazyhouse, you are routing to specific time control screens first.
+    // Those screens should handle the getSocket and queue:join logic.
+    // For other variants, this `handleVariantSelect` directly joins the queue.
     if (variant === "classic") {
       router.replace({ pathname: "/classictimecontrol", params: { userId } } as any);
+      setSocketConnecting(false); // No socket connection needed here directly
       return;
     } else if (variant === "crazyhouse") {
       router.replace({ pathname: "/crazytimecontrol", params: { userId } } as any);
+      setSocketConnecting(false); // No socket connection needed here directly
       return;
     }
-    setSocketConnecting(true);
-    const socketInstance = getSocket(userId, "matchmaking");
-    socketInstance.connect();
-    socketInstance.on("connect", () => {
-      socketInstance.emit("queue:join", { userId, variant });
-      setSocketConnecting(false);
-      router.replace({ pathname: "/matchmaking", params: { variant, userId } });
-    });
-    socketInstance.on("connect_error", () => {
-      alert("Failed to connect to server!");
-      setSocketConnecting(false);
-    });
   };
+
+const handleTournamentSelect = async () => {
+  if (!userId) {
+    Alert.alert("Login Required", "Please log in to join tournaments.");
+    return;
+  }
+
+  setSocketConnecting(true);
+  const socketInstance = getSocket(userId, "matchmaking"); // Re-using the matchmaking socket for tournament entry
+
+  socketInstance.connect(); // Ensure connection attempt
+
+  const onConnectSuccess = () => {
+    console.log("Matchmaking socket connected for tournament.");
+    socketInstance.off("connect", onConnectSuccess); // Clean up self-listening
+    socketInstance.off("connect_error", onConnectError); // Clean up error listener
+
+    // Navigate to the TournamentScreen.
+    // The TournamentScreen will then handle emitting "tournament:join" and other tournament-specific events.
+    router.replace({ pathname: "/tournament", params: { userId } });
+    setSocketConnecting(false);
+  };
+
+  const onConnectError = (error: Error) => {
+    console.error("Matchmaking socket connection error:", error);
+    Alert.alert("Connection Failed", "Failed to connect to the server for tournaments. Please try again.");
+    socketInstance.off("connect", onConnectSuccess);
+    socketInstance.off("connect_error", onConnectError);
+    setSocketConnecting(false);
+  };
+
+  socketInstance.on("connect", onConnectSuccess);
+  socketInstance.on("connect_error", onConnectError);
+};
 
   const handleProfile = () => {
     closeSidebar();
@@ -128,7 +191,7 @@ export default function Choose() {
       }, 100);
     } catch (e) {
       console.error("Failed to logout", e);
-      alert("Logout failed!");
+      Alert.alert("Logout Failed", "There was an error logging out. Please try again.");
     }
   };
 
@@ -138,43 +201,88 @@ export default function Choose() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Navbar */}
-      <View style={styles.navbar}>
-        <TouchableOpacity onPress={toggleSidebar} style={styles.menuIcon}>
-          <Text style={styles.menuIconText}>☰</Text>
+      {/* Top Navigation Bar */}
+      <View style={styles.topNavBar}>
+        <TouchableOpacity style={styles.topNavButton} onPress={handleProfile}>
+          {/* Placeholder for profile icon/image */}
+          <View style={styles.profileIconPlaceholder} />
+          <Text style={styles.topNavButtonText}>Profile</Text>
         </TouchableOpacity>
-        <Text style={styles.userNameText}>{userName || "Loading..."}</Text>
-        <View style={styles.navbarRightPlaceholder} /> {/* Placeholder for alignment */}
+        <TouchableOpacity style={styles.topNavButton} onPress={handleLeaderboard}>
+          {/* Placeholder for leaderboard icon */}
+          <Text style={styles.topNavButtonText}>🏆</Text>
+          <Text style={styles.topNavButtonText}>Leaderboard</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.topNavButton}>
+          {/* Placeholder for newsletter icon */}
+          <Text style={styles.topNavButtonText}>✉️</Text>
+          <Text style={styles.topNavButtonText}>Newsletter</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <ScrollView contentContainerStyle={styles.scrollViewContent}>
-        <Text style={styles.title}>Choose Your Variant</Text>
+        {/* Placeholder for the "Get 10% Cashback" banner */}
+        <View style={styles.bannerContainer}>
+          <Image
+            source={{ uri: 'https://via.placeholder.com/350x150?text=Get+10%25+Cashback' }} // Replace with actual image
+            style={styles.bannerImage}
+            resizeMode="cover"
+          />
+          <TouchableOpacity style={styles.rechargeButton}>
+            <Text style={styles.rechargeButtonText}>Recharge Now</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionTitle}>For You</Text>
+
         {socketConnecting && (
           <View style={styles.connectingContainer}>
             <ActivityIndicator size="large" color="#00A862" />
             <Text style={styles.connectingText}>Connecting to server...</Text>
           </View>
         )}
-        {variants.map((variant) => (
-          <TouchableOpacity
-            key={variant.title}
-            style={[
-              styles.card,
-              { width: cardWidth },
-              (!userId || socketConnecting) && styles.cardDisabled,
-            ]}
-            activeOpacity={0.85}
-            onPress={() => handleVariantSelect(variant.name)}
-            disabled={!userId || socketConnecting}
-          >
-            <Text style={styles.cardTitle}>{variant.title}</Text>
-            <Text style={styles.cardDescription}>{variant.description}</Text>
-          </TouchableOpacity>
-        ))}
+
+        {/* Variants Section - Modified to be a column of cards */}
+        <View style={styles.variantsColumn}>
+          {variants.map((variant) => (
+            <TouchableOpacity
+              key={variant.title}
+              style={[
+                styles.variantCardFullWidth, // New style for full width
+                (!userId || socketConnecting) && styles.cardDisabled,
+              ]}
+              activeOpacity={0.85}
+              onPress={() => handleVariantSelect(variant.name)}
+              disabled={!userId || socketConnecting}
+            >
+              <Text style={styles.variantCardTitle}>{variant.title}</Text>
+              <Text style={styles.variantCardDescription}>{variant.description}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </ScrollView>
 
-      {/* Sidebar Overlay */}
+      {/* Bottom Navigation Bar */}
+      <View style={styles.bottomNavBar}>
+        <TouchableOpacity style={styles.bottomNavButton} onPress={handleProfile}>
+          {/* Placeholder for profile icon */}
+          <Text style={styles.bottomNavButtonIcon}>👤</Text>
+          <Text style={styles.bottomNavButtonText}>Profile</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.bottomNavButton} onPress={handleTournamentSelect}>
+          {/* Placeholder for tournament icon */}
+          <Text style={styles.bottomNavButtonIcon}>🏆</Text>
+          <Text style={styles.bottomNavButtonText}>Tournament</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.bottomNavButton} onPress={handleLogout}>
+          {/* Placeholder for logout icon */}
+          <Text style={styles.bottomNavButtonIcon}>➡️</Text>
+          <Text style={styles.bottomNavButtonText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Sidebar Overlay and Sidebar (kept for existing functionality) */}
       {isSidebarOpen && (
         <TouchableOpacity
           style={styles.overlay}
@@ -183,7 +291,6 @@ export default function Choose() {
         />
       )}
 
-      {/* Sidebar */}
       <Animated.View
         style={[
           styles.sidebar,
@@ -207,7 +314,7 @@ export default function Choose() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Profile Card Overlay */}
+      {/* Profile Card Overlay (kept for existing functionality) */}
       {showProfileCard && (
         <View style={styles.profileOverlay}>
           <View style={styles.profileCard}>
@@ -233,81 +340,143 @@ export default function Choose() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#23272A",
+    backgroundColor: "#1A1A1A", // Darker background for the whole app
   },
-  navbar: {
+  topNavBar: {
     flexDirection: "row",
+    justifyContent: "space-around",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: "#2C2F33",
+    paddingVertical: 10,
+    backgroundColor: "#222222", // Slightly lighter than background
     borderBottomWidth: 1,
-    borderBottomColor: "#36393F",
+    borderBottomColor: "#333333",
   },
-  menuIcon: {
-    padding: 5,
+  topNavButton: {
+    alignItems: "center",
+    paddingHorizontal: 10,
   },
-  menuIconText: {
-    color: "#fff",
-    fontSize: 24,
+  profileIconPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#00A862", // Example color for profile icon
+    marginBottom: 4,
   },
-  userNameText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  navbarRightPlaceholder: {
-    width: 34, // Same width as menuIcon to balance the layout
+  topNavButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
   },
   scrollViewContent: {
     flexGrow: 1,
-    justifyContent: "center",
+    padding: 15,
     alignItems: "center",
-    padding: 20,
   },
-  title: {
-    color: "#fff",
-    fontSize: 28,
+  bannerContainer: {
+    width: "100%",
+    borderRadius: 10,
+    overflow: "hidden",
+    marginBottom: 20,
+    alignItems: 'center',
+    backgroundColor: '#333333', // Fallback background for banner
+  },
+  bannerImage: {
+    width: '100%',
+    height: 150, // Adjust height as needed
+  },
+  rechargeButton: {
+    backgroundColor: '#FFD700', // Gold color for the button
+    paddingVertical: 10,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    marginTop: -20, // Overlap with the image slightly
+    marginBottom: 10,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  rechargeButtonText: {
+    color: '#333333',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  sectionTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
     fontWeight: "bold",
-    marginBottom: 24,
-    textAlign: "center",
+    marginBottom: 15,
+    alignSelf: 'flex-start', // Align title to the left
+    marginLeft: 10,
   },
   connectingContainer: {
-    marginBottom: 32,
+    marginBottom: 20,
     alignItems: "center",
   },
   connectingText: {
-    color: "#b0b3b8",
-    fontSize: 16,
-    marginTop: 12,
+    color: "#B0B0B0",
+    fontSize: 14,
+    marginTop: 8,
   },
-  card: {
-    backgroundColor: "#2C2F33",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
+  // New style for variants to be in a column
+  variantsColumn: {
+    flexDirection: 'column', // Ensures items stack vertically
+    width: '100%', // Takes full width of the parent
+  },
+  // New style for variant cards to take full width
+  variantCardFullWidth: {
+    backgroundColor: "#222222",
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15, // Add margin bottom for spacing between cards
+    width: '100%', // Takes full width of its parent (variantsColumn)
     alignItems: "center",
     elevation: 3,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
+    borderColor: '#444444',
+    borderWidth: 1,
   },
   cardDisabled: {
     opacity: 0.5,
   },
-  cardTitle: {
+  variantCardTitle: {
     color: "#00A862",
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: "bold",
-    marginBottom: 6,
+    marginBottom: 5,
     textAlign: "center",
   },
-  cardDescription: {
-    color: "#b0b3b8",
-    fontSize: 15,
+  variantCardDescription: {
+    color: "#B0B0B0",
+    fontSize: 12,
     textAlign: "center",
+  },
+  bottomNavBar: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    paddingVertical: 10,
+    backgroundColor: "#222222",
+    borderTopWidth: 1,
+    borderTopColor: "#333333",
+  },
+  bottomNavButton: {
+    alignItems: "center",
+    paddingHorizontal: 10,
+  },
+  bottomNavButtonIcon: {
+    fontSize: 24,
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+  bottomNavButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
   },
   overlay: {
     position: "absolute",
@@ -323,7 +492,6 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     bottom: 0,
-    // width will be set dynamically in component
     backgroundColor: "#2C2F33",
     zIndex: 20,
     paddingTop: 20,
@@ -360,7 +528,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   logoutText: {
-    color: "#FF4D4D", // A red color for logout
+    color: "#FF4D4D",
   },
   profileOverlay: {
     position: "absolute",
