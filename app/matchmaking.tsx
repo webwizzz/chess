@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Text, View, Alert } from "react-native"; // Import Alert
+import { ActivityIndicator, Alert, Image, Text, View } from "react-native"; // Import Alert
 import { Socket } from "socket.io-client";
 import { getSocket, getSocketInstance } from "../utils/socketManager";
 import ChessGame from "./ChessGame";
@@ -140,31 +140,22 @@ export default function MatchMaking() {
       setTimeout(() => {
         setIsMatchFound(true);
         setLoading(true);
-
-        // Clean up matchmaking listeners relevant to this screen
-        // IMPORTANT: Do NOT disconnect the socket here. Instead, the backend should
-        // have handled removing from queue and setting status.
-        // We just need to stop listening for new queue:matched events after game starts.
+        
+        // Clean up matchmaking listeners
         socket.off("queue:matched");
-        socket.off("queue:error");
-        socket.off("queue:cooldown");
-        // No need to emit 'queue:leave' here; the backend should clear the user once matched.
-        // If you disconnect the socket here, you will lose connection to the game socket as well
-        // since getSocketInstance() returns the same instance.
-        // The game socket logic should handle its own connection.
+        socket.emit("queue:leave");
+        socket.disconnect();        
 
         const sessionId = response.sessionId;
         console.log("Match found! Session ID:", sessionId);
-        // Use the variant and subvariant from the response, as it might be different
-        // if matched with a tournament player (especially for subvariant in Classic).
-        const gameSocketInstance = getSocket(userId, "game", sessionId, response.variant, response.subvariant);
-        if (!gameSocketInstance) {
+        const gameSocket = getSocket(userId, "game", sessionId, variant, subvariant);
+        if (!gameSocket) {
           console.error("Failed to get game socket instance");
-          Alert.alert("Failed to connect to game. Please try again.");
+          alert("Failed to connect to game. Please try again.");
           setLoading(false);
           return;
         }
-        setGameSocket(gameSocketInstance);
+        setGameSocket(gameSocket);
         console.log("Connected to game socket for session:", sessionId);
         setLoading(false);
 

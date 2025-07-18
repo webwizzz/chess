@@ -92,6 +92,14 @@ export default function Choose() {
       return;
     }
 
+    if (variant === "classic") {
+      router.replace({ pathname: "/classictimecontrol", params: { userId } } as any);
+      return;
+    } else if (variant === "crazyhouse") {
+      router.replace({ pathname: "/crazytimecontrol", params: { userId } } as any);
+      return;
+    }
+
     // Connect to matchmaking socket and join queue for regular games
     setSocketConnecting(true);
     const socketInstance = getSocket(userId, "matchmaking"); // Ensure this gets the shared instance
@@ -125,15 +133,6 @@ export default function Choose() {
     // For classic and crazyhouse, you are routing to specific time control screens first.
     // Those screens should handle the getSocket and queue:join logic.
     // For other variants, this `handleVariantSelect` directly joins the queue.
-    if (variant === "classic") {
-      router.replace({ pathname: "/classictimecontrol", params: { userId } } as any);
-      setSocketConnecting(false); // No socket connection needed here directly
-      return;
-    } else if (variant === "crazyhouse") {
-      router.replace({ pathname: "/crazytimecontrol", params: { userId } } as any);
-      setSocketConnecting(false); // No socket connection needed here directly
-      return;
-    }
   };
 
 const handleTournamentSelect = async () => {

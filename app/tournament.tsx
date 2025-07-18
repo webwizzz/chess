@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react"; // Added useCallback
 import {
   ActivityIndicator,
   Alert,
@@ -87,7 +87,6 @@ interface TournamentDetails {
   createdAt: number;
 }
 
-
 export default function TournamentScreen() {
   const router = useRouter();
   const { userId } = useLocalSearchParams<{ userId: string }>();
@@ -104,33 +103,26 @@ export default function TournamentScreen() {
   const [matchedVariant, setMatchedVariant] = useState<string | null>(null);
   const [matchedSubvariant, setMatchedSubvariant] = useState<string | null>(null);
 
-
-  // Effect for socket initialization and cleanup
+  // --- Socket Initialization and Cleanup ---
   useEffect(() => {
     const existingSocket = getSocketInstance();
     if (existingSocket) {
       setSocket(existingSocket);
       console.log("Using existing socket instance for tournament screen");
+      // Keep a general any-event listener for debugging
       existingSocket.onAny((event: string, ...args: any[]) => {
-        console.log("[SOCKET EVENT - TOURNAMENT]", event, args);
+        console.log("[SOCKET EVENT - TOURNAMENT SCREEN]", event, args);
       });
-      
-      // Immediately request active tournament details when socket is ready
-      // This ensures the display updates quickly upon navigating to this screen.
-      // Make sure userId is available here if tournament:get_active needs it as payload.
-      // (However, typically tournament:get_active would just rely on socket ID for auth)
-      // socket.emit("tournament:get_active"); // Moved this line here
-      // No, keep it in the second useEffect as it depends on `socket` state which is set here.
-      // The dependency array of the second useEffect will handle this.
-
     } else {
       Alert.alert("Connection Error", "Failed to connect to the server.");
       router.replace("/choose"); // Redirect if no socket
     }
 
     return () => {
-      // Clean up listeners when component unmounts
-      if (existingSocket) {
+      // General cleanup for listeners that *might* still be active if
+      // the component unmounts before a match is found or explicitly left.
+      // The `queue:matched` handler performs a more targeted cleanup.
+      if (existingSocket && existingSocket.connected && !isMatchFound) {
         existingSocket.off("tournament:active_details");
         existingSocket.off("tournament:joined");
         existingSocket.off("tournament:left");
@@ -138,134 +130,160 @@ export default function TournamentScreen() {
         existingSocket.off("queue:matched");
         existingSocket.off("tournament:new_active");
         existingSocket.off("queue:cooldown");
+        // No disconnect here unless absolutely necessary for the component lifecycle.
+        // `getSocketInstance()` implies a singleton, so disconnecting it here might
+        // affect other parts of the app if they rely on the same persistent socket.
+        // The game transition handles its own socket lifecycle.
       }
     };
-  }, []); // Empty dependency array, runs once on mount
+  }, [isMatchFound, router]); // Added router to dependencies for safety
 
-  // Effect for socket listeners and initial active tournament fetch
+  // --- Tournament & Matchmaking Listeners ---
   useEffect(() => {
-    if (!socket || !userId) { // Ensure socket and userId are available
-        console.log("Socket or userId not available for tournament listeners setup.");
-        return;
+    if (!socket || !userId) {
+      console.log("Socket or userId not available for tournament listeners setup.");
+      return;
     }
 
-    socket.emit("tournament:join", {userId})
+    // Request active tournament details on mount
+    socket.emit("tournament:get_active");
 
-    // --- Tournament Specific Listeners ---
-    socket.on("tournament:active_details", (response: { tournament: TournamentDetails | null }) => {
+    // Listeners are wrapped in useCallback to prevent re-creation on every render
+    // and make cleanup more reliable.
+
+    const handleActiveDetails = (response: { tournament: TournamentDetails | null }) => {
       console.log("Active tournament details:", response.tournament);
-      // Backend sometimes sends as an array, sometimes as object. Adjust for robust handling.
       setActiveTournament(response.tournament);
       setIsJoiningTournament(false);
-    });
+    };
 
-    socket.on("tournament:new_active", (response: { tournamentId: string, name: string }) => {
+    const handleNewActive = (response: { tournamentId: string, name: string }) => {
       Alert.alert("New Tournament!", `A new tournament "${response.name}" (${response.tournamentId}) has started!`);
-      // Re-fetch active tournament details
-      socket.emit("tournament:get_active");
-    });
+      socket.emit("tournament:get_active"); // Re-fetch details for the new tournament
+    };
 
-    socket.on("tournament:joined", (response: { tournament: TournamentDetails }) => {
+    const handleTournamentJoined = (response: { tournament: TournamentDetails }) => {
       console.log("Joined tournament:", response.tournament);
       setActiveTournament(response.tournament);
       setIsJoiningTournament(false);
       setIsTournamentQueueing(true); // User is now in the tournament matchmaking queue
       setTimer(0); // Start matchmaking timer
-    });
+    };
 
-    socket.on("tournament:left", (response: { message: string }) => {
+    const handleTournamentLeft = (response: { message: string }) => {
       Alert.alert("Tournament Status", response.message);
       setActiveTournament(null);
       setIsTournamentQueueing(false);
       setOpponent(null);
       setTimer(0);
-    });
+      setIsJoiningTournament(false); // Reset joining state if left
+    };
 
-    socket.on("tournament:error", (response: { message: string; error?: any }) => {
+    const handleTournamentError = (response: { message: string; error?: any }) => {
       console.error("Tournament error:", response);
       Alert.alert("Tournament Error", response.message + (response.error ? `: ${response.error}` : ''));
       setIsJoiningTournament(false);
       setIsTournamentQueueing(false);
-    });
+    };
 
-    socket.on("queue:cooldown", (response: { until: number }) => {
+    const handleCooldown = (response: { until: number }) => {
       const remainingSeconds = Math.ceil((response.until - Date.now()) / 1000);
       Alert.alert("Cooldown", `You are on cooldown. Try again in ${remainingSeconds} seconds.`);
       setIsJoiningTournament(false);
       setIsTournamentQueueing(false);
-    });
+    };
 
-    // --- Matchmaking Listener (shared with regular queue) ---
-    // This listener will now also handle matches originating from the tournament queue.
-    socket.on("queue:matched", (response: {
+    const handleQueueMatched = (response: {
       opponent: { userId: string; name: string };
       variant: string;
       subvariant?: string;
       sessionId: string;
       gameState: GameState;
-      tournamentMatch?: boolean; // New flag
+      tournamentMatch?: boolean;
     }) => {
       console.log("Received match found response:", response);
       setOpponent(response.opponent.name);
       setGameState(response.gameState);
-      setMatchedVariant(response.variant); // Store the assigned variant
-      setMatchedSubvariant(response.subvariant || null); // Store assigned subvariant
-      setTimer(0); // Reset timer when match is found
+      setMatchedVariant(response.variant);
+      setMatchedSubvariant(response.subvariant || null);
+      setTimer(0);
 
-      if (response.tournamentMatch) {
-        Alert.alert("Tournament Match!", `You've been matched in ${response.variant} ${response.subvariant || ''} with ${response.opponent.name}!`);
-      } else {
-        Alert.alert("Match Found!", `You've been matched in ${response.variant} ${response.subvariant || ''} with ${response.opponent.name}!`);
-      }
+      const matchType = response.tournamentMatch ? "Tournament Match!" : "Match Found!";
+      Alert.alert(matchType, `You've been matched in ${response.variant} ${response.subvariant || ''} with ${response.opponent.name}!`);
 
-      // Switch from matchmaking to game mode
+      // Give a short delay to show the match found alert before transitioning
       setTimeout(() => {
         setIsMatchFound(true);
         setLoading(true);
 
-        // Clean up matchmaking listeners relevant to this screen
-        // IMPORTANT: Do NOT disconnect the socket here if you want to keep tournament session
-        // Instead, the backend should handle removing from queue and setting status.
-        // We just need to stop listening for new queue:matched events after game starts.
-        socket.off("queue:matched");
-        socket.off("tournament:joined"); // No longer need this after joining and being matched
-        socket.off("tournament:error"); // Game socket will handle errors for game
+        // --- Crucial: Clean up ONLY this component's specific listeners ---
+        socket.off("tournament:active_details", handleActiveDetails);
+        socket.off("tournament:new_active", handleNewActive);
+        socket.off("tournament:joined", handleTournamentJoined);
+        socket.off("tournament:left", handleTournamentLeft);
+        socket.off("tournament:error", handleTournamentError);
+        socket.off("queue:cooldown", handleCooldown);
+        socket.off("queue:matched", handleQueueMatched); // Remove this listener too
 
-        // Get game socket instance
+        // Disconnect the current socket, as a new `gameSocket` will be created.
+        // This ensures a clean slate for the game session.
+        console.log("Disconnecting lobby socket for game transition...");
+        socket.disconnect();
+        console.log("Lobby socket disconnected.");
+
+        // Get new game socket instance with session ID and variant details
         const sessionId = response.sessionId;
-        console.log("Match found! Session ID:", sessionId);
-        // Pass the assigned variant and subvariant to the game socket
-        // Ensure getSocket can use the main socket's userId if needed, or pass it explicitly.
-        // (Assuming getSocket internally handles connection if already connected)
         const gameSocketInstance = getSocket(userId, "game", sessionId, response.variant, response.subvariant);
+
         if (!gameSocketInstance) {
           console.error("Failed to get game socket instance");
           Alert.alert("Failed to connect to game. Please try again.");
           setLoading(false);
-          // Consider re-joining tournament queue if game connection fails
+          // Consider re-joining tournament queue or showing an error state here
           return;
         }
         setGameSocket(gameSocketInstance);
         console.log("Connected to game socket for session:", sessionId);
         setLoading(false);
-      }, 2000); // Show "Match Found!" for 2 seconds before transitioning
-    });
+      }, 2000); // 2 seconds to show the alert
+    };
 
-    // Initial fetch for active tournament details
-    socket.emit("tournament:get_active");
+    // Attach all listeners
+    socket.on("tournament:active_details", handleActiveDetails);
+    socket.on("tournament:new_active", handleNewActive);
+    socket.on("tournament:joined", handleTournamentJoined);
+    socket.on("tournament:left", handleTournamentLeft);
+    socket.on("tournament:error", handleTournamentError);
+    socket.on("queue:cooldown", handleCooldown);
+    socket.on("queue:matched", handleQueueMatched); // This listens for *any* match
 
-  }, [socket, userId]); // Dependency array, runs when socket or userId changes
+    // Cleanup function for this useEffect
+    return () => {
+      // Remove all listeners when component unmounts or dependencies change
+      if (socket && socket.connected) {
+        socket.off("tournament:active_details", handleActiveDetails);
+        socket.off("tournament:new_active", handleNewActive);
+        socket.off("tournament:joined", handleTournamentJoined);
+        socket.off("tournament:left", handleTournamentLeft);
+        socket.off("tournament:error", handleTournamentError);
+        socket.off("queue:cooldown", handleCooldown);
+        socket.off("queue:matched", handleQueueMatched);
+      }
+    };
+  }, [socket, userId]); // Dependencies: socket and userId
 
-  // Matchmaking timer for tournament queue
+  // --- Matchmaking Timer Effect ---
   useEffect(() => {
-    if (!isTournamentQueueing || opponent || isMatchFound) return;
-
     const interval = setInterval(() => {
       setTimer((prev) => prev + 1);
     }, 1000);
 
-    // Optional: If no opponent found after a long time, consider giving option to leave
-    if (timer > 60 && timer % 30 === 0) { // Every 30 seconds after first minute
+    if (!isTournamentQueueing || opponent || isMatchFound) {
+      clearInterval(interval); // Clear any lingering interval if state changes
+      return;
+    }
+
+    if (timer > 60 && timer % 30 === 0) {
       Alert.alert(
         "Still Searching...",
         `No opponent found in ${timer} seconds. Do you want to continue waiting or leave the tournament?`,
@@ -277,70 +295,57 @@ export default function TournamentScreen() {
     }
 
     return () => clearInterval(interval);
-  }, [timer, opponent, isMatchFound, isTournamentQueueing]);
+  }, [timer, opponent, isMatchFound, isTournamentQueueing]); // Dependencies for timer
 
-
-  const handleJoinTournament = () => {
+  // --- Handlers ---
+  const handleJoinTournament = useCallback(() => {
     if (!socket || !userId) {
       Alert.alert("Error", "Not connected to server or user not identified.");
       return;
     }
-    if (!activeTournament) {
-        Alert.alert("No Tournament", "No active tournament available to join.");
-        return;
+    if (activeTournament && activeTournament.status !== 'open') {
+      Alert.alert("Tournament Closed", "Tournament registration is closed.");
+      return;
     }
-    if (activeTournament.status !== 'open') {
-        Alert.alert("Tournament Closed", "Tournament registration is closed.");
+    if (activeTournament && activeTournament.participantsCount >= activeTournament.capacity) {
+        Alert.alert("Tournament Full", "This tournament has reached its maximum capacity.");
         return;
     }
     setIsJoiningTournament(true);
-    // CRITICAL FIX: Emit userId with the tournament:join event
     socket.emit("tournament:join", { userId });
-  };
+  }, [socket, userId, activeTournament]); // Dependencies for useCallback
 
-  const handleLeaveTournament = () => {
+  const handleLeaveTournament = useCallback(() => {
     if (!socket || !userId) {
       Alert.alert("Error", "Not connected to server or user not identified.");
       return;
     }
-    setIsJoiningTournament(false); // Reset state
-    setIsTournamentQueueing(false); // Reset queueing state
-    setOpponent(null); // Reset opponent
-    setTimer(0); // Reset timer
-    socket.emit("tournament:leave", { userId }); // Emit userId for leave as well
-  };
+    // Reset states immediately for responsive UI
+    setIsJoiningTournament(false);
+    setIsTournamentQueueing(false);
+    setOpponent(null);
+    setTimer(0);
+    setGameState(null); // Clear game state
+    setIsMatchFound(false); // Clear match found status
+    setLoading(false); // Clear loading state
+    setMatchedVariant(null); // Clear matched variant
+    setMatchedSubvariant(null); // Clear matched subvariant
 
-  // Render the appropriate game component based on the matched variant
+    // Emit the leave event
+    socket.emit("tournament:leave", { userId });
+  }, [socket, userId]); // Dependencies for useCallback
+
+  // Render the appropriate game component
   if (isMatchFound && gameState && gameSocket && matchedVariant) {
     switch (matchedVariant) {
       case "classic":
-        return (
-          <ChessGame
-            initialGameState={gameState}
-            userId={userId}
-          />
-        );
+        return <ChessGame initialGameState={gameState} userId={userId}  />;
       case "decay":
-        return (
-          <DecayChessGame
-            initialGameState={gameState}
-            userId={userId}
-          />
-        );
+        return <DecayChessGame initialGameState={gameState} userId={userId}  />;
       case "sixpointer":
-        return (
-          <SixPointChessGame
-            initialGameState={gameState}
-            userId={userId}
-          />
-        );
+        return <SixPointChessGame initialGameState={gameState} userId={userId} />;
       case "crazyhouse":
-        return (
-          <CrazyHouse
-            initialGameState={gameState}
-            userId={userId}
-          />
-        );
+        return <CrazyHouse initialGameState={gameState} userId={userId}  />;
       default:
         return (
           <Text style={styles.errorText}>
@@ -349,7 +354,6 @@ export default function TournamentScreen() {
         );
     }
   } else if (loading) {
-    // Show loading spinner while waiting for match to be established
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#00A862" />
@@ -394,7 +398,7 @@ export default function TournamentScreen() {
             <TouchableOpacity
               style={styles.button}
               onPress={handleJoinTournament}
-              disabled={isJoiningTournament || activeTournament.status !== 'open' || activeTournament.participantsCount >= activeTournament.capacity}
+              disabled={isJoiningTournament || (activeTournament.status !== 'open') || (activeTournament.participantsCount >= activeTournament.capacity)}
             >
               {isJoiningTournament ? (
                 <ActivityIndicator color="#fff" />
@@ -406,20 +410,21 @@ export default function TournamentScreen() {
         </View>
       ) : (
         <View style={styles.noTournamentContainer}>
-          <Text style={styles.infoText}>No active tournaments found.</Text>
-          <Text style={styles.subInfoText}>Stay tuned for upcoming events!</Text>
+          <Text style={styles.infoText}>No active tournaments found. Click "Join Tournament" to start one!</Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={handleJoinTournament}
+            disabled={isJoiningTournament}
+          >
+            {isJoiningTournament ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Join Tournament</Text>
+            )}
+          </TouchableOpacity>
           <ActivityIndicator size="large" color="#00A862" style={{ marginTop: 20 }}/>
         </View>
       )}
-
-      {/* For admin to create tournament (optional, add proper authorization) */}
-      {/* <TouchableOpacity
-        style={[styles.button, { marginTop: 20 }]}
-        onPress={() => Alert.alert('Admin', 'Implement admin tournament creation here')}
-      >
-        <Text style={styles.buttonText}>Create New Tournament (Admin)</Text>
-      </TouchableOpacity> */}
-
     </View>
   );
 }
@@ -474,7 +479,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   leaveButton: {
-    backgroundColor: "#DC3545", // Red for leave
+    backgroundColor: "#DC3545",
   },
   buttonText: {
     color: "#fff",
