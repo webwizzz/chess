@@ -7,6 +7,8 @@ interface Player {
   name: string;
   email: string;
   ratings?: number;
+  win?: number;
+  lose?: number;
 }
 
 export default function Leaderboard() {
@@ -52,6 +54,8 @@ export default function Leaderboard() {
               <Text style={styles.email}>{player.email}</Text>
               <View style={styles.statsRow}>
                 <Text style={styles.score}>Score: {player.ratings}</Text>
+                <Text style={styles.stat}>Wins: {player.win}</Text>
+                <Text style={styles.stat}>Lost: {player.lose}</Text>
               </View>
             </View>
           ))}
