@@ -31,13 +31,32 @@ interface GameState {
     };
   };
   board: {
-    fen: string;
-    position: string;
-    activeColor: "white" | "black";
-    castlingRights: string;
-    enPassantSquare: string;
-    halfmoveClock: number;
-    fullmoveNumber: number;
+    fen: string
+    position: string
+    activeColor: "white" | "black"
+    castlingRights: string
+    enPassantSquare: string
+    halfmoveClock: number
+    fullmoveNumber: number
+    whiteTime?: number
+    blackTime?: number
+    turnStartTimestamp?: number
+    lastMoveTimestamp?: number
+    moveHistory?: { from: string; to: string; [key: string]: any }[]
+    pocketedPieces: {
+      white: string[]
+      black: string[]
+    }
+    dropTimers?: {
+      white: { [piece: string]: number }
+      black: { [piece: string]: number }
+    }
+    gameStarted?: boolean
+    firstMoveTimestamp?: number
+    gameEnded?: boolean
+    endReason?: string | null
+    winner?: string | null
+    endTimestamp?: number | null
   };
   timeControl: {
     type: string;
@@ -172,8 +191,15 @@ export default function MatchMaking() {
 
     socket.on("queue:cooldown", (response: { until: number }) => {
       const remainingSeconds = Math.ceil((response.until - Date.now()) / 1000);
-      Alert.alert("Cooldown", `You are on cooldown. Try again in ${remainingSeconds} seconds.`);
-      router.replace("/choose"); // Redirect on cooldown
+      Alert.alert("Cooldown", `You are on cooldown. Waiting ${remainingSeconds} seconds before retrying...`);
+      setLoading(true);
+
+      // Wait for cooldown to expire, then retry joining the queue
+      setTimeout(() => {
+        setLoading(false);
+        socket.emit("queue:join", { variant, subvariant });
+        setTimer(0);
+      }, remainingSeconds * 1000);
     });
 
 
