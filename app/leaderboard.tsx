@@ -1,63 +1,40 @@
-import React, { useState } from "react";
+import axios from "axios";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
 interface Player {
   _id: string;
   name: string;
   email: string;
-  matchesWon: number;
-  matchesLost: number;
+  ratings?: number;
 }
 
 export default function Leaderboard() {
-  // Dummy data for leaderboard
-  const dummyPlayers: Player[] = [
-    {
-      _id: "1",
-      name: "Alice",
-      email: "alice@example.com",
-      matchesWon: 10,
-      matchesLost: 2,
-    },
-    {
-      _id: "2",
-      name: "Bob",
-      email: "bob@example.com",
-      matchesWon: 8,
-      matchesLost: 5,
-    },
-    {
-      _id: "3",
-      name: "Charlie",
-      email: "charlie@example.com",
-      matchesWon: 6,
-      matchesLost: 7,
-    },
-    {
-      _id: "4",
-      name: "David",
-      email: "david@example.com",
-      matchesWon: 4,
-      matchesLost: 10,
-    },
-    {
-      _id: "5",
-      name: "Eve",
-      email: "eve@example.com",
-      matchesWon: 12,
-      matchesLost: 1,
-    },
-  ];
-
-  const [players, setPlayers] = useState<Player[]>(dummyPlayers);
-  const [loading, setLoading] = useState(false); // No loading for dummy
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Calculate score for each player
-  const getScore = (player: Player) => player.matchesWon * 3 + player.matchesLost * -2;
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      try {
+        const response = await axios.get("http://localhost:3000/api/leaderboard");
+        console.log("Fetched players:", response.data);
+        // Adjust this based on how your API returns the data
+        const fetchedPlayers = response.data.users || response.data;
+        setPlayers(fetchedPlayers);
+      } catch (err) {
+        console.error("Error fetching players:", err);
+        setError("Failed to load leaderboard.");
+      } finally {
+        setLoading(false);
+      }
+    }
 
-  // Sort players by score descending
-  const sortedPlayers = [...players].sort((a, b) => getScore(b) - getScore(a));
+    fetchData();
+  }, []);
+
+ 
 
   return (
     <View style={styles.container}>
@@ -68,15 +45,13 @@ export default function Leaderboard() {
         <Text style={styles.error}>{error}</Text>
       ) : (
         <ScrollView contentContainerStyle={styles.listContent}>
-          {sortedPlayers.map((player, idx) => (
+          {players.map((player, idx) => (
             <View key={player._id} style={styles.card}>
               <Text style={styles.rank}>#{idx + 1}</Text>
               <Text style={styles.name}>{player.name}</Text>
               <Text style={styles.email}>{player.email}</Text>
               <View style={styles.statsRow}>
-                <Text style={styles.stat}>Won: {player.matchesWon}</Text>
-                <Text style={styles.stat}>Lost: {player.matchesLost}</Text>
-                <Text style={styles.score}>Score: {getScore(player)}</Text>
+                <Text style={styles.score}>Score: {player.ratings}</Text>
               </View>
             </View>
           ))}
@@ -119,6 +94,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
+    elevation: 3,
   },
   rank: {
     color: "#FFD700",
