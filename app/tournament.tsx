@@ -38,13 +38,32 @@ interface GameState {
     };
   };
   board: {
-    fen: string;
-    position: string;
-    activeColor: "white" | "black";
-    castlingRights: string;
-    enPassantSquare: string;
-    halfmoveClock: number;
-    fullmoveNumber: number;
+    fen: string
+    position: string
+    activeColor: "white" | "black"
+    castlingRights: string
+    enPassantSquare: string
+    halfmoveClock: number
+    fullmoveNumber: number
+    whiteTime?: number
+    blackTime?: number
+    turnStartTimestamp?: number
+    lastMoveTimestamp?: number
+    moveHistory?: { from: string; to: string; [key: string]: any }[]
+    pocketedPieces: {
+      white: string[]
+      black: string[]
+    }
+    dropTimers?: {
+      white: { [piece: string]: number }
+      black: { [piece: string]: number }
+    }
+    gameStarted?: boolean
+    firstMoveTimestamp?: number
+    gameEnded?: boolean
+    endReason?: string | null
+    winner?: string | null
+    endTimestamp?: number | null
   };
   timeControl: {
     type: string;
