@@ -1,6 +1,7 @@
 "use client"
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../utils/socketManager"
@@ -81,6 +82,7 @@ interface GameState {
       black: boolean
     }
     timeSpent?: { white: any; black: any }
+    timeSpent?: { white: any; black: any }
   }
   status: string
   result: string
@@ -99,6 +101,8 @@ interface GameState {
     gameEnded?: boolean
     result?: string
     winner?: string | null
+    result?: string
+    winner?: string | null
     endReason?: string | null
   }
   userColor: {
@@ -112,16 +116,28 @@ interface GameState {
   rules?: any
   metadata?: any
   timers?: any
+  positionHistory?: string[]
+  createdAt?: number
+  lastActivity?: number
+  startedAt?: number
+  endedAt?: number | null
+  rules?: any
+  metadata?: any
+  timers?: any
 }
 
 interface Move {
+  from?: string
   from?: string
   to: string
   piece?: string
   drop?: boolean
   promotion?: string
+  drop?: boolean
+  promotion?: string
 }
 
+interface CrazyHouseChessGameProps {
 interface CrazyHouseChessGameProps {
   initialGameState: GameState
   userId: string
@@ -151,6 +167,11 @@ const boardSize = screenWidth
 const squareSize = boardSize / 8
 
 export default function CrazyHouseChessGame({ initialGameState, userId, onNavigateToMenu }: CrazyHouseChessGameProps) {
+const screenWidth = Dimensions.get("window").width
+const boardSize = screenWidth
+const squareSize = boardSize / 8
+
+export default function CrazyHouseChessGame({ initialGameState, userId, onNavigateToMenu }: CrazyHouseChessGameProps) {
   const router = useRouter()
   const [gameState, setGameState] = useState<GameState>(initialGameState)
   const [socket, setSocket] = useState<Socket | null>(null)
@@ -162,12 +183,16 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   const [playerColor, setPlayerColor] = useState<"white" | "black">("white")
   const [boardFlipped, setBoardFlipped] = useState(false)
   const [moveHistory, setMoveHistory] = useState<any[]>([])
+  const [moveHistory, setMoveHistory] = useState<any[]>([])
   const [showMoveHistory, setShowMoveHistory] = useState(false)
   const [promotionModal, setPromotionModal] = useState<{
     visible: boolean
     from?: string
+    from?: string
     to: string
     options: string[]
+    drop?: boolean
+    piece?: string
     drop?: boolean
     piece?: string
   } | null>(null)
@@ -307,7 +332,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         return { white: newWhite, black: newBlack }
       })
     }, 100)
-
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
@@ -383,6 +407,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     }
   }
 
+  function handlePossibleMoves(data: { square: string; moves: any[] }) {
   function handlePossibleMoves(data: { square: string; moves: any[] }) {
     let moves: string[] = []
     if (Array.isArray(data.moves) && data.moves.length > 0) {
@@ -749,10 +774,12 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   }
 
   function renderBoard() {
+  function renderBoard() {
     const files = boardFlipped ? [...FILES].reverse() : FILES
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
+      <View style={styles.boardContainer}>
       <View style={styles.boardContainer}>
         <View style={styles.board}>
           {ranks.map((rank) => (
@@ -800,11 +827,18 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           <View style={styles.moveHistoryModal}>
             <View style={styles.moveHistoryHeader}>
               <Text style={styles.moveHistoryTitle}>Moves</Text>
+              <Text style={styles.moveHistoryTitle}>Moves</Text>
               <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.moveHistoryScroll}>
+              {moves.map((move, idx) => (
+                <View key={idx} style={styles.moveRow}>
+                  <Text style={styles.moveNumber}>{idx + 1}.</Text>
+                  <Text style={styles.moveText}>{move.san || `${move.from || ""}-${move.to || ""}`}</Text>
+                </View>
+              ))}
               {moves.map((move, idx) => (
                 <View key={idx} style={styles.moveRow}>
                   <Text style={styles.moveNumber}>{idx + 1}.</Text>
@@ -857,6 +891,10 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
       <Modal visible={showGameEndModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.gameEndModal}>
+            <Text style={styles.gameEndTitle}>
+              {isWinner === true ? "VICTORY!" : isWinner === false ? "DEFEAT" : "GAME OVER"}
+            </Text>
+            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
             <Text style={styles.gameEndTitle}>
               {isWinner === true ? "VICTORY!" : isWinner === false ? "DEFEAT" : "GAME OVER"}
             </Text>
@@ -923,13 +961,22 @@ const styles = StyleSheet.create({
   boardContainer: { alignItems: "center", justifyContent: "center" },
   board: {},
   row: { flexDirection: "row" },
+  container: { flex: 1, backgroundColor: "#222", alignItems: "center" },
+  boardContainer: { alignItems: "center", justifyContent: "center" },
+  board: {},
+  row: { flexDirection: "row" },
   square: {
     justifyContent: "center",
     alignItems: "center",
     position: "relative",
     borderWidth: 1,
     borderColor: "#444",
+    borderWidth: 1,
+    borderColor: "#444",
   },
+  selectedSquare: { backgroundColor: "#f7ec74" },
+  possibleMoveSquare: { backgroundColor: "rgba(255,255,0,0.3)" },
+  pieceText: { fontSize: 28, color: "#fff", fontWeight: "bold" },
   selectedSquare: { backgroundColor: "#f7ec74" },
   possibleMoveSquare: { backgroundColor: "rgba(255,255,0,0.3)" },
   pieceText: { fontSize: 28, color: "#fff", fontWeight: "bold" },
@@ -940,7 +987,10 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: "rgba(0,0,0,0.3)",
     opacity: 0.8,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    opacity: 0.8,
   },
+  captureIndicator: {
   captureIndicator: {
     position: "absolute",
     top: 0,
@@ -951,7 +1001,20 @@ const styles = StyleSheet.create({
     borderTopWidth: 16,
     borderLeftColor: "transparent",
     borderTopColor: "rgba(255,0,0,0.3)",
+    top: 0,
+    right: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 16,
+    borderTopWidth: 16,
+    borderLeftColor: "transparent",
+    borderTopColor: "rgba(255,0,0,0.3)",
   },
+  playerInfoBlock: {
+    width: "100%",
+    backgroundColor: "#222",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   playerInfoBlock: {
     width: "100%",
     backgroundColor: "#222",
