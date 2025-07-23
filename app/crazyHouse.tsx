@@ -4,19 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../utils/socketManager"
-
-// Define types for pocket pieces
-interface PocketPieceStandard {
-  type: string // e.g., "p", "n", "b"
-}
-
-interface PocketPieceWithTimer {
-  type: string
-  id: string
-  capturedAt: number
-}
-
-type PocketPiece = PocketPieceStandard | PocketPieceWithTimer
+import GameControls from "./GameControls"
 
 // Types
 interface Player {
@@ -48,25 +36,24 @@ interface GameState {
     blackTime?: number
     turnStartTimestamp?: number
     lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
-    pocketedPieces: {
-      white: PocketPiece[]
-      black: PocketPiece[]
-    }
-    dropTimers?: {
-      white: { [pieceId: string]: number }
-      black: { [pieceId: string]: number }
-    }
-    frozenPieces?: {
-      white: PocketPieceWithTimer[]
-      black: PocketPieceWithTimer[]
-    }
+    moveHistory?: { from: string; to: string; drop?: boolean; piece?: string; [key: string]: any }[]
+    repetitionMap?: any
     gameStarted?: boolean
     firstMoveTimestamp?: number
-    gameEnded?: boolean
-    endReason?: string | null
-    winner?: string | null
-    endTimestamp?: number | null
+    capturedPieces?: {
+      white: string[]
+      black: string[]
+    }
+    pocketPanel?: {
+      white: string[]
+      black: string[]
+    }
+    pocketTimers?: {
+      white: PocketTimer[]
+      black: PocketTimer[]
+    }
+    pocketTimeLimit?: number
+    gameVariant?: string
   }
   timeControl: {
     type: string
@@ -143,6 +130,21 @@ const PIECE_SYMBOLS = {
   P: "♙",
 }
 
+const PIECE_VALUES = {
+  p: 1,
+  P: 1,
+  n: 3,
+  N: 3,
+  b: 3,
+  B: 3,
+  r: 5,
+  R: 5,
+  q: 9,
+  Q: 9,
+  k: 0,
+  K: 0,
+}
+
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
 
@@ -156,8 +158,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   const [socket, setSocket] = useState<Socket | null>(null)
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
   const [possibleMoves, setPossibleMoves] = useState<string[]>([])
-  const [selectedPocketPiece, setSelectedPocketPiece] = useState<string | PocketPieceWithTimer | null>(null)
-  const [selectedPocket, setSelectedPocket] = useState<"white" | "black" | null>(null)
+  const [possibleDrops, setPossibleDrops] = useState<string[]>([])
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [playerColor, setPlayerColor] = useState<"white" | "black">("white")
   const [boardFlipped, setBoardFlipped] = useState(false)
@@ -174,57 +175,639 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   const [showGameEndModal, setShowGameEndModal] = useState(false)
   const [gameEndMessage, setGameEndMessage] = useState("")
   const [isWinner, setIsWinner] = useState<boolean | null>(null)
-  const [localTimers, setLocalTimers] = useState<{ white: number; black: number }>({
-    white: initialGameState.timeControl.timers.white,
-    black: initialGameState.timeControl.timers.black,
-  })
-  const [localDropTimers, setLocalDropTimers] = useState<{ white: number | null; black: number | null }>({
-    white: null,
-    black: null,
-  })
+  const [gameEndDetails, setGameEndDetails] = useState<{
+    reason?: string
+    moveSan?: string
+    moveMaker?: string
+    winner?: string | null
+    winnerName?: string | null
+  }>({})
 
+  // Timer management
   const timerRef = useRef<any>(null)
   const navigationTimeoutRef = useRef<any>(null)
 
+  // Screen dimensions
+  const screenWidth = Dimensions.get("window").width
+  const screenHeight = Dimensions.get("window").height
+  const isTablet = Math.min(screenWidth, screenHeight) > 600
+  const isSmallScreen = Math.min(screenWidth, screenHeight) < 400
+
+  // Calculate board size
+  const containerPadding = isTablet ? 24 : isSmallScreen ? 12 : 16
+  const availableWidth = screenWidth - containerPadding * 2
+  const pocketPanelWidth = Math.min(120, availableWidth * 0.25)
+  const boardSize = Math.min(availableWidth - pocketPanelWidth - 16, screenHeight * 0.5, isTablet ? 400 : 320)
+  const squareSize = boardSize / 8
+
+  // Timer sync state
+  function safeTimerValue(val: any): number {
+    const n = Number(val)
+    return isNaN(n) || n === undefined || n === null ? 0 : Math.max(0, n)
+  }
+
+  const [localTimers, setLocalTimers] = useState<{ white: number; black: number }>({
+    white: safeTimerValue(initialGameState.timeControl.timers.white),
+    black: safeTimerValue(initialGameState.timeControl.timers.black),
+  })
+
+  const [localPocketTimers, setLocalPocketTimers] = useState<{
+    white: PocketTimer[]
+    black: PocketTimer[]
+  }>({
+    white: initialGameState.board.pocketTimers?.white || [],
+    black: initialGameState.board.pocketTimers?.black || [],
+  })
+
+  const lastServerSync = useRef<{
+    white: number
+    black: number
+    activeColor: "white" | "black"
+    timestamp: number
+    turnStartTime: number
+    isFirstMove: boolean
+  }>({
+    white: safeTimerValue(initialGameState.timeControl.timers.white),
+    black: safeTimerValue(initialGameState.timeControl.timers.black),
+    activeColor: initialGameState.board.activeColor,
+    timestamp: Date.now(),
+    turnStartTime: Date.now(),
+    isFirstMove: true,
+  })
+
+  // Helper functions
+  const isWithTimerVariant = useCallback(() => {
+    return (
+      gameState.board.gameVariant === "crazyhouse" ||
+      gameState.subvariantName?.includes("withTimer") ||
+      gameState.board.pocketTimeLimit !== undefined
+    )
+  }, [gameState.board.gameVariant, gameState.subvariantName, gameState.board.pocketTimeLimit])
+
+  const getPieceAt = useCallback(
+    (square: string): string | null => {
+      const fileIndex = FILES.indexOf(square[0])
+      const rankIndex = RANKS.indexOf(square[1])
+      if (fileIndex === -1 || rankIndex === -1) return null
+
+      const fen = gameState.board.fen || gameState.board.position
+      if (!fen) return null
+
+      const piecePlacement = fen.split(" ")[0]
+      const rows = piecePlacement.split("/")
+      if (rows.length !== 8) return null
+
+      const row = rows[rankIndex]
+      let col = 0
+      for (let i = 0; i < row.length; i++) {
+        const c = row[i]
+        if (c >= "1" && c <= "8") {
+          col += Number.parseInt(c)
+        } else {
+          if (col === fileIndex) {
+            return c
+          }
+          col++
+        }
+      }
+      return null
+    },
+    [gameState.board.fen, gameState.board.position],
+  )
+
+  const isPieceOwnedByPlayer = useCallback((piece: string, color: "white" | "black"): boolean => {
+    if (color === "white") {
+      return piece === piece.toUpperCase()
+    } else {
+      return piece === piece.toLowerCase()
+    }
+  }, [])
+
+  // Format time display
+  const formatTime = useCallback((milliseconds: number): string => {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0:00"
+    const totalSeconds = Math.floor(milliseconds / 1000)
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`
+  }, [])
+
+  // Format pocket timer display
+  const formatPocketTime = useCallback((milliseconds: number): string => {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0"
+    return Math.ceil(milliseconds / 1000).toString()
+  }, [])
+
+  // Update pocket timers for withTimer variant
+  const updatePocketTimers = useCallback(() => {
+    if (!isWithTimerVariant()) return
+
+    const currentTime = Date.now()
+    setLocalPocketTimers((prev) => {
+      const newTimers = { white: [...prev.white], black: [...prev.black] }
+      let hasChanges = false
+      ;(["white", "black"] as const).forEach((color) => {
+        newTimers[color] = newTimers[color].filter((timer) => {
+          const remaining = timer.expiresAt - currentTime
+          if (remaining <= 0) {
+            console.log(`[POCKET] ${color} ${timer.piece} expired`)
+            hasChanges = true
+            return false
+          }
+          timer.remainingTime = remaining
+          return true
+        })
+      })
+
+      return hasChanges ? newTimers : prev
+    })
+  }, [isWithTimerVariant])
+
+  // Handle game ending
+  const handleGameEnd = useCallback(
+    (
+      result: string,
+      winner: string | null,
+      endReason: string,
+      details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null },
+    ) => {
+      console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
+
+      // Stop all timers
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
+
+      // Determine if current player won
+      let playerWon: boolean | null = null
+      let message = ""
+
+      if (result === "checkmate") {
+        if (winner === playerColor) {
+          playerWon = true
+          message = "🎉 VICTORY! 🎉\nCheckmate! You won the game!"
+        } else if (winner && winner !== playerColor) {
+          playerWon = false
+          message = "😔 DEFEAT 😔\nCheckmate! You lost the game."
+        } else {
+          playerWon = null
+          message = "🏁 GAME OVER 🏁\nCheckmate occurred"
+        }
+      } else if (result === "timeout") {
+        if (winner === playerColor) {
+          playerWon = true
+          message = "🎉 VICTORY! 🎉\nYour opponent ran out of time!"
+        } else if (winner && winner !== playerColor) {
+          playerWon = false
+          message = "😔 DEFEAT 😔\nYou ran out of time!"
+        } else {
+          playerWon = null
+          message = "🏁 GAME OVER 🏁\nTime expired"
+        }
+      } else if (result === "draw") {
+        playerWon = null
+        message = `⚖️ DRAW ⚖️\n${endReason || "Game ended in a draw"}`
+      } else {
+        playerWon = null
+        message = `🏁 GAME OVER 🏁\n${result}`
+      }
+
+      setIsWinner(playerWon)
+      setGameEndMessage(message)
+      setShowGameEndModal(true)
+      setGameEndDetails({
+        reason: endReason,
+        moveSan: details?.moveSan,
+        moveMaker: details?.moveMaker,
+        winner,
+        winnerName: details?.winnerName,
+      })
+
+      // Disconnect socket after delay
+      setTimeout(() => {
+        if (socket) {
+          console.log("[SOCKET] Disconnecting from game")
+          socket.disconnect()
+          setSocket(null)
+        }
+      }, 1000)
+
+      // Auto-navigate to menu
+      navigationTimeoutRef.current = setTimeout(() => {
+        setShowGameEndModal(false)
+        if (onNavigateToMenu) {
+          onNavigateToMenu()
+        }
+        router.replace("/choose")
+      }, 5000)
+    },
+    [playerColor, socket, onNavigateToMenu, router],
+  )
+
+  // Navigate to menu manually
+  const navigateToMenu = useCallback(() => {
+    if (navigationTimeoutRef.current) {
+      clearTimeout(navigationTimeoutRef.current)
+    }
+    setShowGameEndModal(false)
+    if (socket) {
+      socket.disconnect()
+      setSocket(null)
+    }
+    if (onNavigateToMenu) {
+      onNavigateToMenu()
+    }
+  }, [socket, onNavigateToMenu])
+
+  // Initialize game
   useEffect(() => {
     const gameSocket = getSocketInstance()
     if (gameSocket) {
       setSocket(gameSocket)
-    } else {
+      console.log("Connected to Crazyhouse game socket")
+    }
+
+    if (!gameSocket) {
+      console.error("Failed to connect to game socket")
       Alert.alert("Connection Error", "Failed to connect to game socket. Please try again.")
       return
     }
 
-    const userColor = initialGameState.userColor[userId]
-    setPlayerColor(userColor === "white" || userColor === "black" ? userColor : "white")
-    setBoardFlipped(userColor === "black")
-    setIsMyTurn(initialGameState.board.activeColor === userColor)
-
-    // Initialize local drop timers if it's a withTimer variant
-    if (initialGameState.subvariantName === "withTimer") {
-      const activeColor = initialGameState.board.activeColor
-      const pocket = initialGameState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]
-      const dropTimersMap = new Map(Object.entries(initialGameState.board.dropTimers?.[activeColor] || {}))
-
-      if (pocket.length > 0) {
-        const firstPiece = pocket[0]
-        const expirationTimestamp = dropTimersMap.get(firstPiece.id)
-        if (expirationTimestamp) {
-          const remaining = expirationTimestamp - Date.now()
-          setLocalDropTimers((prev) => ({
-            ...prev,
-            [activeColor]: Math.max(0, remaining),
-          }))
-        }
-      }
-    }
+    // Initial player color and board orientation
+    const userColor = gameState.userColor[userId]
+    const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white"
+    setPlayerColor(safePlayerColor)
+    setBoardFlipped(safePlayerColor === "black")
+    setIsMyTurn(gameState.board.activeColor === safePlayerColor)
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
+      if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
       if (navigationTimeoutRef.current) clearTimeout(navigationTimeoutRef.current)
     }
+  }, [gameState.userColor, userId, gameState.board.activeColor])
+
+  // Update player state when game state changes
+  useEffect(() => {
+    const userColor = gameState.userColor[userId]
+    const safePlayerColor = userColor === "white" || userColor === "black" ? userColor : "white"
+    setPlayerColor(safePlayerColor)
+    setBoardFlipped(safePlayerColor === "black")
+    setIsMyTurn(gameState.board.activeColor === safePlayerColor)
+  }, [gameState, userId])
+
+  // Timer management effect
+  useEffect(() => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (gameState.status !== "active" || gameState.gameState?.gameEnded) return
+
+    // Update server sync reference
+    const now = Date.now()
+    const currentWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
+    const currentBlackTime = safeTimerValue(gameState.timeControl.timers.black)
+    const moveCount = gameState.moves?.length || gameState.board?.moveHistory?.length || 0
+    const isFirstMove = moveCount === 0
+
+    // Initialize local timers immediately
+    setLocalTimers({
+      white: currentWhiteTime,
+      black: currentBlackTime,
+    })
+
+    lastServerSync.current = {
+      white: currentWhiteTime,
+      black: currentBlackTime,
+      activeColor: gameState.board.activeColor,
+      timestamp: now,
+      turnStartTime: gameState.board.turnStartTimestamp || now,
+      isFirstMove: isFirstMove,
+    }
+
+    console.log("[TIMER] Setting up timer for active color:", gameState.board.activeColor)
+    console.log("[TIMER] Initial times - White:", currentWhiteTime, "Black:", currentBlackTime)
+
+    // Start local timer countdown
+    timerRef.current = setInterval(() => {
+      const now = Date.now()
+      const serverSync = lastServerSync.current
+      const elapsedSinceSync = now - serverSync.timestamp
+
+      setLocalTimers((prev) => {
+        let newWhite = serverSync.white
+        let newBlack = serverSync.black
+
+        if (!serverSync.isFirstMove) {
+          if (serverSync.activeColor === "white") {
+            newWhite = Math.max(0, serverSync.white - elapsedSinceSync)
+            newBlack = serverSync.black
+          } else if (serverSync.activeColor === "black") {
+            newBlack = Math.max(0, serverSync.black - elapsedSinceSync)
+            newWhite = serverSync.white
+          }
+        }
+
+        // Check for timeout
+        if (newWhite <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("WHITE TIMEOUT DETECTED")
+          handleGameEnd("timeout", "black", "White ran out of time")
+          return { white: 0, black: newBlack }
+        }
+        if (newBlack <= 0 && !gameState.gameState?.gameEnded) {
+          console.log("BLACK TIMEOUT DETECTED")
+          handleGameEnd("timeout", "white", "Black ran out of time")
+          return { white: newWhite, black: 0 }
+        }
+
+        return { white: newWhite, black: newBlack }
+      })
+    }, 100)
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [
+    gameState.status,
+    gameState.board.activeColor,
+    gameState.timeControl.timers.white,
+    gameState.timeControl.timers.black,
+    gameState.board.turnStartTimestamp,
+    gameState.moves?.length,
+    gameState.board?.moveHistory?.length,
+    gameState.gameState?.gameEnded,
+    handleGameEnd,
+  ])
+
+  // Pocket timer management effect (for withTimer variant)
+  useEffect(() => {
+    if (!isWithTimerVariant()) return
+
+    if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
+
+    pocketTimerRef.current = setInterval(() => {
+      updatePocketTimers()
+    }, 100)
+
+    return () => {
+      if (pocketTimerRef.current) clearInterval(pocketTimerRef.current)
+    }
+  }, [isWithTimerVariant, updatePocketTimers])
+
+  // Socket event handlers (same as before but with Alert instead of alert)
+  const handleGameMove = useCallback(
+    (data: any) => {
+      console.log("[MOVE] Move received:", data)
+      if (data && data.gameState) {
+        // Extract timer values
+        const newWhiteTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime,
+        )
+        const newBlackTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime,
+        )
+
+        // Update server sync reference
+        const now = Date.now()
+        lastServerSync.current = {
+          white: newWhiteTime,
+          black: newBlackTime,
+          activeColor: data.gameState.board.activeColor,
+          timestamp: now,
+          turnStartTime: data.gameState.board.turnStartTimestamp || now,
+          isFirstMove: (data.gameState.moves?.length || 0) === 0,
+        }
+
+        // Check if game ended
+        if (
+          data.gameState.gameState?.gameEnded ||
+          data.gameState.gameState?.checkmate ||
+          data.gameState.status === "ended" ||
+          data.gameState.shouldNavigateToMenu
+        ) {
+          const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+          let winner = data.gameState.gameState?.winner || data.gameState.winner
+
+          if (result === "checkmate") {
+            const checkmatedPlayer = data.gameState.board.activeColor
+            winner = checkmatedPlayer === "white" ? "black" : "white"
+          }
+
+          const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
+          const lastMove = data.gameState.move || data.move
+          const moveMaker = lastMove?.color || "unknown"
+          const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+
+          let winnerName = null
+          if (winner && data.gameState.players && data.gameState.players[winner]) {
+            winnerName = data.gameState.players[winner].username
+          }
+
+          handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
+          return
+        }
+
+        // Update game state
+        setGameState((prevState) => ({
+          ...prevState,
+          ...data.gameState,
+          board: {
+            ...prevState.board,
+            ...data.gameState.board,
+          },
+          timeControl: {
+            ...prevState.timeControl,
+            ...data.gameState.timeControl,
+            timers: {
+              white: newWhiteTime,
+              black: newBlackTime,
+            },
+          },
+          moves: data.gameState.moves || [],
+          lastMove: data.gameState.lastMove,
+          moveCount: data.gameState.moveCount,
+        }))
+
+        // Update pocket timers if withTimer variant
+        if (isWithTimerVariant() && data.gameState.board.pocketTimers) {
+          setLocalPocketTimers({
+            white: data.gameState.board.pocketTimers.white || [],
+            black: data.gameState.board.pocketTimers.black || [],
+          })
+        }
+
+        // Update local timers
+        setLocalTimers({ white: newWhiteTime, black: newBlackTime })
+        setMoveHistory(data.gameState.moves || [])
+        setSelectedSquare(null)
+        setSelectedPocketPiece(null)
+        setPossibleMoves([])
+        setPossibleDrops([])
+
+        // Update turn state
+        const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
+        const activeColor = data.gameState.board.activeColor
+        const newIsMyTurn = activeColor === userColor
+        setIsMyTurn(newIsMyTurn)
+      }
+    },
+    [gameState.timeControl.timers, handleGameEnd, userId, playerColor, isWithTimerVariant],
+  )
+
+  function handlePossibleMoves(data: { square: string; moves: any[] }) {
+    let moves: string[] = []
+    if (Array.isArray(data.moves) && data.moves.length > 0) {
+      if (typeof data.moves[0] === "object" && data.moves[0].to) {
+        moves = data.moves.map((m: any) => m.to)
+      } else if (typeof data.moves[0] === "string") {
+        moves = data.moves
+      }
+    }
+    setPossibleMoves(moves)
+  }
+
+  // Other socket handlers (simplified for brevity - same logic as web version)
+  const handleGameStateUpdate = useCallback(
+    (data: any) => {
+      console.log("Game state update:", data)
+      if (data && data.gameState) {
+        // Check for game ending
+        if (
+          data.gameState.gameState?.gameEnded ||
+          data.gameState.status === "ended" ||
+          data.gameState.shouldNavigateToMenu
+        ) {
+          const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
+          const winner = data.gameState.gameState?.winner || data.gameState.winner
+          const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
+          handleGameEnd(result, winner, endReason)
+          return
+        }
+
+        // Extract timer values
+        const newWhiteTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.white || data.gameState.board?.whiteTime,
+        )
+        const newBlackTime = safeTimerValue(
+          data.gameState.timeControl?.timers?.black || data.gameState.board?.blackTime,
+        )
+
+        // Update server sync reference
+        const now = Date.now()
+        lastServerSync.current = {
+          white: newWhiteTime,
+          black: newBlackTime,
+          activeColor: data.gameState.board.activeColor,
+          timestamp: now,
+          turnStartTime: data.gameState.board.turnStartTimestamp || now,
+          isFirstMove: (data.gameState.moves?.length || data.gameState.board?.moveHistory?.length || 0) === 0,
+        }
+
+        setGameState((prevState) => ({
+          ...prevState,
+          ...data.gameState,
+          timeControl: {
+            ...prevState.timeControl,
+            ...data.gameState.timeControl,
+            timers: {
+              white: newWhiteTime,
+              black: newBlackTime,
+            },
+          },
+        }))
+
+        setLocalTimers({ white: newWhiteTime, black: newBlackTime })
+        setIsMyTurn(data.gameState.board.activeColor === playerColor)
+      }
+    },
+    [handleGameEnd, playerColor, gameState.timeControl.timers],
+  )
+
+  const handleTimerUpdate = useCallback(
+    (data: any) => {
+      console.log("Timer update:", data)
+
+      // Check for game ending
+      if (data.gameEnded || data.shouldNavigateToMenu) {
+        const result = data.endReason || "timeout"
+        const winner = data.winner || data.winnerColor
+        handleGameEnd(result, winner, result)
+        return
+      }
+
+      // Handle timer update formats
+      let whiteTime: number
+      let blackTime: number
+
+      if (data.timers && typeof data.timers === "object") {
+        whiteTime = safeTimerValue(data.timers.white)
+        blackTime = safeTimerValue(data.timers.black)
+      } else if (typeof data.white === "number" && typeof data.black === "number") {
+        whiteTime = safeTimerValue(data.white)
+        blackTime = safeTimerValue(data.black)
+      } else {
+        whiteTime = safeTimerValue(data.white ?? data.timers?.white ?? gameState.timeControl.timers.white)
+        blackTime = safeTimerValue(data.black ?? data.timers?.black ?? gameState.timeControl.timers.black)
+      }
+
+      console.log("[TIMER UPDATE] White:", whiteTime, "Black:", blackTime)
+
+      // Update server sync reference
+      lastServerSync.current = {
+        white: whiteTime,
+        black: blackTime,
+        activeColor: data.activeColor || gameState.board.activeColor,
+        timestamp: Date.now(),
+        turnStartTime: data.turnStartTimestamp || Date.now(),
+        isFirstMove: (gameState.moves?.length || gameState.board?.moveHistory?.length || 0) === 0,
+      }
+
+      // Update local timers
+      setLocalTimers({ white: whiteTime, black: blackTime })
+
+      setGameState((prevState) => ({
+        ...prevState,
+        timeControl: {
+          ...prevState.timeControl,
+          timers: { white: whiteTime, black: blackTime },
+        },
+        board: {
+          ...prevState.board,
+          activeColor: data.activeColor || prevState.board.activeColor,
+        },
+      }))
+    },
+    [
+      handleGameEnd,
+      gameState.board.activeColor,
+      gameState.moves?.length,
+      gameState.board?.moveHistory?.length,
+      gameState.timeControl.timers,
+    ],
+  )
+
+  const handleGameEndEvent = useCallback(
+    (data: any) => {
+      console.log("Game end event received:", data)
+      const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
+      const winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
+      const endReason = data.gameState?.gameState?.endReason || data.gameState?.endReason || data.endReason || result
+      handleGameEnd(result, winner, endReason)
+    },
+    [handleGameEnd],
+  )
+
+  const handleGameError = useCallback((data: any) => {
+    console.log("Game error:", data)
+    Alert.alert("Error", data.message || data.error || "An error occurred")
   }, [])
 
+  const handleGameWarning = useCallback((data: any) => {
+    console.warn("[GAME WARNING] Received warning:", data)
+    setGameState((prev) => ({ ...prev, gameState: data.gameState }))
+    Alert.alert("Game Warning", data.message || "An unexpected warning occurred.")
+  }, [])
+
+  // Add this new state and effect after the existing useState declarations:
+  const [socketConnected, setSocketConnected] = useState(false)
+
+  // Set up socket event listeners
   useEffect(() => {
     if (!socket) return
 
@@ -245,513 +828,490 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
       socket.off("game:error", handleGameError)
       socket.off("game:warning", handleGameWarning)
     }
-  }, [socket, playerColor])
-
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current)
-
-    if (gameState.status !== "active" || gameState.gameState?.gameEnded) {
-      setLocalDropTimers({ white: null, black: null }) // Clear drop timers if game not active/ended
-      return
-    }
-
-    timerRef.current = setInterval(() => {
-      setLocalTimers((prevMainTimers) => {
-        const activeColor = gameState.board.activeColor
-        const now = Date.now()
-        let newWhite = prevMainTimers.white
-        let newBlack = prevMainTimers.black
-
-        // Update main game clock
-        if (activeColor === "white") {
-          newWhite = Math.max(0, newWhite - 100)
-        } else {
-          newBlack = Math.max(0, newBlack - 100)
-        }
-
-        // Update drop timers if it's a "withTimer" variant
-        if (gameState.subvariantName === "withTimer") {
-          setLocalDropTimers((prevDropTimers) => {
-            const newDropTimers = { ...prevDropTimers }
-            const currentActivePlayerPocket =
-              (gameState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]) || []
-            const currentActivePlayerDropTimersMap = new Map(
-              Object.entries(gameState.board.dropTimers?.[activeColor] || {}),
-            )
-
-            if (currentActivePlayerPocket.length > 0) {
-              const firstPiece = currentActivePlayerPocket[0]
-              const expirationTimestamp = currentActivePlayerDropTimersMap.get(firstPiece.id)
-
-              if (expirationTimestamp) {
-                const remaining = expirationTimestamp - now
-                newDropTimers[activeColor] = Math.max(0, remaining)
-              } else {
-                newDropTimers[activeColor] = null // No active timer for the first piece
-              }
-            } else {
-              newDropTimers[activeColor] = null // No pieces in pocket
-            }
-
-            // Ensure the other player's drop timer is null as only one player has an active drop timer
-            const otherColor = activeColor === "white" ? "black" : "white"
-            newDropTimers[otherColor] = null
-
-            return newDropTimers
-          })
-        } else {
-          // If not withTimer, ensure drop timers are null
-          setLocalDropTimers({ white: null, black: null })
-        }
-
-        return { white: newWhite, black: newBlack }
-      })
-    }, 100)
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
   }, [
-    gameState.status,
-    gameState.board.activeColor,
-    gameState.timeControl.timers.white,
-    gameState.timeControl.timers.black,
-    gameState.gameState?.gameEnded,
-    gameState.subvariantName,
-    gameState.board.pocketedPieces,
-    gameState.board.dropTimers,
+    socket,
+    handleGameMove,
+    handlePossibleMoves,
+    handleGameStateUpdate,
+    handleTimerUpdate,
+    handleGameEndEvent,
+    handleGameError,
+    handleGameWarning,
   ])
 
-  // Socket handlers
-  function handleGameMove(data: any) {
-    if (data && data.gameState) {
-      console.log("Game move received:", data.gameState)
-      setGameState((prevState) => {
-        const newState = {
-          ...prevState,
-          ...data.gameState,
-          board: { ...prevState.board, ...data.gameState.board },
-          timeControl: {
-            ...prevState.timeControl,
-            ...data.gameState.timeControl,
-            timers: {
-              white: data.gameState.timeControl?.timers?.white ?? prevState.timeControl.timers.white,
-              black: data.gameState.timeControl?.timers?.black ?? prevState.timeControl.timers.black,
-            },
-          },
-          moves: data.gameState.moves || [],
-          lastMove: data.gameState.lastMove,
-          moveCount: data.gameState.moveCount,
-        }
-
-        // Re-hydrate dropTimers Maps if they come as plain objects (only for withTimer)
-        if (newState.subvariantName === "withTimer" && newState.board.dropTimers) {
-          newState.board.dropTimers.white = new Map(Object.entries(newState.board.dropTimers.white || {}))
-          newState.board.dropTimers.black = new Map(Object.entries(newState.board.dropTimers.black || {}))
-        }
-
-        // Update local drop timers immediately based on new state
-        if (newState.subvariantName === "withTimer") {
-          const activeColor = newState.board.activeColor
-          const pocket = newState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]
-          const dropTimersMap = new Map(Object.entries(newState.board.dropTimers?.[activeColor] || {}))
-          const now = Date.now()
-
-          setLocalDropTimers((prev) => {
-            const newDropTimers = { white: null, black: null } // Reset both
-            if (pocket.length > 0) {
-              const firstPiece = pocket[0]
-              const expirationTimestamp = dropTimersMap.get(firstPiece.id)
-              if (expirationTimestamp) {
-                newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
-              }
-            }
-            return newDropTimers
-          })
-        } else {
-          setLocalDropTimers({ white: null, black: null })
-        }
-
-        return newState
-      })
-      setMoveHistory(data.gameState.moves || [])
-      setSelectedSquare(null)
-      setPossibleMoves([])
-      setSelectedPocketPiece(null)
-      const userColor = data.gameState.userColor ? data.gameState.userColor[userId] : playerColor
-      setIsMyTurn(data.gameState.board.activeColor === userColor)
-    }
-  }
-
-  function handlePossibleMoves(data: { square: string; moves: any[] }) {
-    let moves: string[] = []
-    if (Array.isArray(data.moves) && data.moves.length > 0) {
-      if (typeof data.moves[0] === "object" && data.moves[0].to) {
-        moves = data.moves.map((m: any) => m.to)
-      } else if (typeof data.moves[0] === "string") {
-        moves = data.moves
-      }
-    }
-    setPossibleMoves(moves)
-  }
-
-  function handleGameStateUpdate(data: any) {
-    if (data && data.gameState) {
-      setGameState((prevState) => {
-        const newState = {
-          ...prevState,
-          ...data.gameState,
-          timeControl: {
-            ...prevState.timeControl,
-            ...data.gameState.timeControl,
-            timers: {
-              white: data.gameState.timeControl?.timers?.white ?? prevState.timeControl.timers.white,
-              black: data.gameState.timeControl?.timers?.black ?? prevState.timeControl.timers.black,
-            },
-          },
-        }
-
-        // Re-hydrate dropTimers Maps if they come as plain objects (only for withTimer)
-        if (newState.subvariantName === "withTimer" && newState.board.dropTimers) {
-          newState.board.dropTimers.white = new Map(Object.entries(newState.board.dropTimers.white || {}))
-          newState.board.dropTimers.black = new Map(Object.entries(newState.board.dropTimers.black || {}))
-        }
-
-        // Update local drop timers immediately based on new state
-        if (newState.subvariantName === "withTimer") {
-          const activeColor = newState.board.activeColor
-          const pocket = newState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]
-          const dropTimersMap = new Map(Object.entries(newState.board.dropTimers?.[activeColor] || {}))
-          const now = Date.now()
-
-          setLocalDropTimers((prev) => {
-            const newDropTimers = { white: null, black: null } // Reset both
-            if (pocket.length > 0) {
-              const firstPiece = pocket[0]
-              const expirationTimestamp = dropTimersMap.get(firstPiece.id)
-              if (expirationTimestamp) {
-                newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
-              }
-            }
-            return newDropTimers
-          })
-        } else {
-          setLocalDropTimers({ white: null, black: null })
-        }
-
-        return newState
-      })
-      setIsMyTurn(data.gameState.board.activeColor === playerColor)
-    }
-  }
-
-  function handleTimerUpdate(data: any) {
-    const whiteTime = data.timers?.white ?? data.white ?? localTimers.white
-    const blackTime = data.timers?.black ?? data.black ?? localTimers.black
-    setLocalTimers({ white: whiteTime, black: blackTime })
-  }
-
-  function handleGameEndEvent(data: any) {
-    const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
-    const winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
-    setIsWinner(winner === playerColor ? true : winner ? false : null)
-    setGameEndMessage(result)
-    setShowGameEndModal(true)
-    setTimeout(() => {
-      if (socket) socket.disconnect()
-      setSocket(null)
-    }, 1000)
-    navigationTimeoutRef.current = setTimeout(() => {
-      setShowGameEndModal(false)
-      if (onNavigateToMenu) onNavigateToMenu()
-      router.replace("/choose")
-    }, 5000)
-  }
-
-  function handleGameError(data: any) {
-    Alert.alert("Error", data.message || data.error || "An error occurred")
-  }
-
-  function handleGameWarning(data: any) {
-    Alert.alert("Warning", data?.message || "Warning: Invalid move or rule violation.")
-  }
-
-  // Move logic
-  function requestPossibleMoves(square: string) {
+  // Add this effect after the existing useEffects:
+  useEffect(() => {
     if (!socket) return
-    socket.emit("game:getPossibleMoves", { square })
-  }
 
-  function makeMove(move: Move) {
-    if (!socket || !isMyTurn) return
-    setIsMyTurn(false)
-    setSelectedSquare(null)
-    setPossibleMoves([])
-    setSelectedPocketPiece(null)
-    socket.emit("game:makeMove", { move, timestamp: Date.now() })
-  }
-
-  function handleSquarePress(square: string) {
-    if (selectedPocketPiece && isMyTurn && selectedPocket === playerColor) {
-      const pieceAtTarget = getPieceAt(square)
-      if (!pieceAtTarget) {
-        let pieceToDrop: string
-        if (gameState.subvariantName === "withTimer") {
-          // For withTimer, selectedPocketPiece is PocketPieceWithTimer
-          const selectedPieceObj = selectedPocketPiece as PocketPieceWithTimer
-          const playerPocket = (gameState.board.pocketedPieces[playerColor] as PocketPieceWithTimer[]) || []
-          const playerDropTimers = new Map(Object.entries(gameState.board.dropTimers?.[playerColor] || {}))
-
-          // Check if the selected piece is the *first* in the pocket and has an active timer
-          const firstPieceInPocket = playerPocket.length > 0 ? playerPocket[0] : null
-          const isSelectedPieceActiveDroppable =
-            firstPieceInPocket &&
-            firstPieceInPocket.id === selectedPieceObj.id &&
-            playerDropTimers.has(selectedPieceObj.id) &&
-            playerDropTimers.get(selectedPieceObj.id)! > Date.now()
-
-          if (!isSelectedPieceActiveDroppable) {
-            Alert.alert("Invalid Drop", "This piece is not currently available for drop or its timer has expired.")
-            setSelectedPocketPiece(null)
-            setSelectedPocket(null)
-            setSelectedSquare(null)
-            setPossibleMoves([])
-            return
-          }
-          pieceToDrop = selectedPieceObj.type
-        } else {
-          // For standard, selectedPocketPiece is just the piece type string
-          pieceToDrop = selectedPocketPiece as string
-        }
-
-        makeMove({ to: square, piece: pieceToDrop, drop: true })
-      } else {
-        Alert.alert("Invalid Drop", "You can only drop a piece on an empty square.")
-      }
-      setSelectedPocketPiece(null)
-      setSelectedPocket(null)
-      setSelectedSquare(null)
-      setPossibleMoves([])
-      return
+    const handleConnect = () => {
+      console.log("[SOCKET] Connected")
+      setSocketConnected(true)
     }
 
-    if (selectedSquare === square) {
-      setSelectedSquare(null)
-      setPossibleMoves([])
-      return
+    const handleDisconnect = () => {
+      console.log("[SOCKET] Disconnected")
+      setSocketConnected(false)
     }
 
-    if (selectedSquare && possibleMoves.includes(square)) {
-      // Promotion check
-      const piece = getPieceAt(selectedSquare)
-      const isPromotion =
-        piece &&
-        ((piece.toLowerCase() === "p" && playerColor === "white" && square[1] === "8") ||
-          (piece.toLowerCase() === "p" && playerColor === "black" && square[1] === "1"))
+    const handleConnectError = (error: any) => {
+      console.error("[SOCKET] Connection error:", error)
+      setSocketConnected(false)
+      Alert.alert("Connection Error", "Failed to connect to game server. Please check your internet connection.")
+    }
 
-      if (isPromotion) {
-        setPromotionModal({ visible: true, from: selectedSquare, to: square, options: ["q", "r", "b", "n"] })
+    socket.on("connect", handleConnect)
+    socket.on("disconnect", handleDisconnect)
+    socket.on("connect_error", handleConnectError)
+
+    // Check initial connection state
+    setSocketConnected(socket.connected)
+
+    return () => {
+      socket.off("connect", handleConnect)
+      socket.off("disconnect", handleDisconnect)
+      socket.off("connect_error", handleConnectError)
+    }
+  }, [socket])
+
+  // Game interaction functions
+  const requestPossibleMoves = useCallback(
+    (square: string) => {
+      if (!socket) {
+        console.log("[DEBUG] requestPossibleMoves: No socket connection.")
+        Alert.alert("Connection Error", "No socket connection. Cannot request moves.")
         return
       }
-      makeMove({ from: selectedSquare, to: square })
-      setPromotionModal(null)
-      setSelectedSquare(null)
-      setPossibleMoves([])
-      return
-    }
-
-    const piece = getPieceAt(square)
-    if (isMyTurn && piece && isPieceOwnedByPlayer(piece, playerColor)) {
-      setSelectedSquare(square)
-      requestPossibleMoves(square)
-    } else {
-      setSelectedSquare(null)
-      setPossibleMoves([])
-    }
-  }
-
-  function handlePromotionSelect(promotion: string) {
-    if (promotionModal) {
-      if (promotionModal.drop && promotionModal.piece) {
-        makeMove({ to: promotionModal.to, piece: promotionModal.piece, drop: true, promotion })
-      } else {
-        makeMove({ from: promotionModal.from, to: promotionModal.to, promotion })
+      if (!socket.connected) {
+        console.log("[DEBUG] requestPossibleMoves: Socket not connected.")
+        Alert.alert("Connection Error", "Socket not connected. Cannot request moves.")
+        return
       }
-      setPromotionModal(null)
-      setSelectedSquare(null)
-      setPossibleMoves([])
-    }
-  }
+      console.log("[DEBUG] Emitting game:getPossibleMoves for square:", square)
+      socket.emit("game:getPossibleMoves", { square })
+    },
+    [socket],
+  )
 
-  function getPieceAt(square: string): string | null {
-    const fileIndex = FILES.indexOf(square[0])
-    const rankIndex = RANKS.indexOf(square[1])
-    if (fileIndex === -1 || rankIndex === -1) return null
-
-    const fen = gameState.board.fen || gameState.board.position
-    if (!fen) return null
-
-    const piecePlacement = fen.split(" ")[0]
-    const rows = piecePlacement.split("/")
-    if (rows.length !== 8) return null
-
-    const row = rows[rankIndex]
-    let col = 0
-    for (let i = 0; i < row.length; i++) {
-      const c = row[i]
-      if (c >= "1" && c <= "8") {
-        col += Number.parseInt(c)
-      } else {
-        if (col === fileIndex) return c
-        col++
-      }
-    }
-    return null
-  }
-
-  function isPieceOwnedByPlayer(piece: string, color: "white" | "black"): boolean {
-    return color === "white" ? piece === piece.toUpperCase() : piece === piece.toLowerCase()
-  }
-
-  function formatTime(milliseconds: number): string {
-    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0:00"
-    const totalSeconds = Math.floor(milliseconds / 1000)
-    const minutes = Math.floor(totalSeconds / 60)
-    const seconds = totalSeconds % 60
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`
-  }
-
-  function formatDropTime(milliseconds: number): string {
-    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0.0"
-    const seconds = Math.floor(milliseconds / 1000)
-    const tenths = Math.floor((milliseconds % 1000) / 100)
-    return `${seconds}.${tenths}`
-  }
-
-  // Pocket panel
-  function renderPocketPanel(color: "white" | "black") {
-    const pocket = gameState.board.pocketedPieces[color] || []
-    const isMyPocket = playerColor === color
-    const isMyTurnForPocket = gameState.board.activeColor === color && isMyTurn
-
-    if (gameState.subvariantName === "withTimer") {
-      const frozen = gameState.board.frozenPieces?.[color] || []
-      const dropTimersMap = new Map(Object.entries(gameState.board.dropTimers?.[color] || {}))
-
-      let activeDroppablePiece: PocketPieceWithTimer | null = null
-      let activeDropTimerRemaining: number | null = null
-
-      if (pocket.length > 0) {
-        const firstPiece = pocket[0] as PocketPieceWithTimer
-        const expirationTimestamp = dropTimersMap.get(firstPiece.id)
-        if (expirationTimestamp) {
-          const remaining = expirationTimestamp - Date.now()
-          if (remaining > 0) {
-            activeDroppablePiece = firstPiece
-            activeDropTimerRemaining = remaining
-          }
-        }
-      }
-
-      return (
-        <View style={styles.pocketPanel}>
-          <Text style={styles.pocketLabel}>{color === "white" ? "White Pocket" : "Black Pocket"}</Text>
-          <View style={styles.pocketPieces}>
-            {activeDroppablePiece && (
-              <TouchableOpacity
-                key={activeDroppablePiece.id}
-                style={[
-                  styles.pocketPiece,
-                  (selectedPocketPiece as PocketPieceWithTimer)?.id === activeDroppablePiece.id &&
-                  selectedPocket === color
-                    ? styles.selectedPocketPiece
-                    : null,
-                ]}
-                onPress={() => {
-                  setSelectedPocketPiece(activeDroppablePiece)
-                  setSelectedPocket(color)
-                }}
-                disabled={!isMyTurnForPocket}
-              >
-                <Text style={styles.pieceText}>{PIECE_SYMBOLS[activeDroppablePiece.type]}</Text>
-                {activeDropTimerRemaining !== null && (
-                  <Text style={styles.dropTimerText}>{formatDropTime(localDropTimers[color] || 0)}</Text>
-                )}
-              </TouchableOpacity>
-            )}
-            {frozen.map((piece) => (
-              <View key={piece.id} style={styles.frozenPocketPiece}>
-                <Text style={styles.pieceText}>{PIECE_SYMBOLS[piece.type]}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
+  const makeMove = useCallback(
+    (move: Move) => {
+      console.log(
+        "[DEBUG] Attempting to make move",
+        move,
+        "isMyTurn:",
+        isMyTurn,
+        "socket connected:",
+        !!socket?.connected,
       )
-    } else {
-      // Standard Crazyhouse variant (pocketedPieces are strings)
+
+      if (!socket) {
+        console.log("[DEBUG] No socket connection")
+        Alert.alert("Connection Error", "No socket connection. Please check your internet connection.")
+        return
+      }
+
+      if (!socket.connected) {
+        console.log("[DEBUG] Socket not connected")
+        Alert.alert("Connection Error", "Socket not connected. Please try again.")
+        return
+      }
+
+      if (!isMyTurn) {
+        console.log("[DEBUG] Not your turn")
+        Alert.alert("Invalid Move", "It's not your turn.")
+        return
+      }
+
+      // Immediately update local state (optimistic update)
+      setIsMyTurn(false)
+      setSelectedSquare(null)
+      setSelectedPocketPiece(null)
+      setPossibleMoves([])
+      setPossibleDrops([])
+
+      const moveData = {
+        move: {
+          from: move.from,
+          to: move.to,
+          promotion: move.promotion,
+          drop: move.drop,
+          piece: move.piece,
+        },
+        timestamp: Date.now(),
+      }
+
+      console.log("[DEBUG] Emitting move:", moveData)
+      socket.emit("game:makeMove", moveData)
+
+      // Add timeout to reset state if no response
+      setTimeout(() => {
+        if (!socket?.connected) {
+          console.log("[DEBUG] Move timeout - resetting state")
+          setIsMyTurn(gameState.board.activeColor === playerColor)
+        }
+      }, 5000)
+    },
+    [socket, isMyTurn, gameState.board.activeColor, playerColor],
+  )
+
+  const handleSquarePress = useCallback(
+    (square: string) => {
+      // If we have a selected pocket piece, try to drop it
+      if (selectedPocketPiece && possibleDrops.includes(square)) {
+        makeMove({
+          from: "@",
+          to: square,
+          drop: true,
+          piece: selectedPocketPiece,
+        })
+        setSelectedPocketPiece(null)
+        setPossibleDrops([])
+        return
+      }
+
+      // Regular square selection logic
+      if (selectedSquare === square) {
+        setSelectedSquare(null)
+        setPossibleMoves([])
+        return
+      }
+
+      if (selectedSquare && possibleMoves.includes(square)) {
+        // Check for promotion
+        const piece = getPieceAt(selectedSquare)
+        const isPromotion =
+          piece &&
+          ((piece.toLowerCase() === "p" && playerColor === "white" && square[1] === "8") ||
+            (piece.toLowerCase() === "p" && playerColor === "black" && square[1] === "1"))
+
+        if (isPromotion) {
+          const options = ["q", "r", "b", "n"]
+          setPromotionModal({ visible: true, from: selectedSquare, to: square, options })
+          return
+        }
+
+        makeMove({ from: selectedSquare, to: square })
+        setSelectedSquare(null)
+        setPossibleMoves([])
+        return
+      }
+
+      // Select piece if it's player's turn and piece belongs to them
+      const piece = getPieceAt(square)
+      if (isMyTurn && piece && isPieceOwnedByPlayer(piece, playerColor)) {
+        setSelectedSquare(square)
+        setSelectedPocketPiece(null) // Clear pocket selection
+        setPossibleDrops([])
+        requestPossibleMoves(square)
+      } else {
+        setSelectedSquare(null)
+        setPossibleMoves([])
+      }
+    },
+    [
+      selectedPocketPiece,
+      possibleDrops,
+      selectedSquare,
+      possibleMoves,
+      isMyTurn,
+      playerColor,
+      makeMove,
+      getPieceAt,
+      isPieceOwnedByPlayer,
+      requestPossibleMoves,
+    ],
+  )
+
+  const handlePocketPiecePress = useCallback(
+    (piece: string) => {
+      if (!isMyTurn) {
+        Alert.alert("Invalid Action", "It's not your turn to drop pieces.")
+        return
+      }
+      if (!socket?.connected) {
+        Alert.alert("Connection Error", "Not connected to server. Cannot drop piece.")
+        return
+      }
+
+      if (selectedPocketPiece === piece) {
+        // Deselect
+        setSelectedPocketPiece(null)
+        setPossibleDrops([])
+      } else {
+        // Select pocket piece and get possible drops
+        setSelectedPocketPiece(piece)
+        setSelectedSquare(null) // Clear board selection
+        setPossibleMoves([])
+
+        // Request possible drop squares
+        console.log("[DEBUG] Emitting game:getPossibleDrops for piece:", piece)
+        console.log("[DEBUG] Emitting game:getPossibleDrops for piece:", piece)
+        socket.emit("game:getPossibleDrops", { piece })
+      }
+    },
+    [isMyTurn, selectedPocketPiece, socket],
+  )
+
+  // Handle promotion selection
+  const handlePromotionSelect = useCallback(
+    (promotion: string) => {
+      if (promotionModal) {
+        makeMove({
+          from: promotionModal.from,
+          to: promotionModal.to,
+          promotion,
+        })
+        setPromotionModal(null)
+        setSelectedSquare(null)
+        setPossibleMoves([])
+      }
+    },
+    [promotionModal, makeMove],
+  )
+
+  // Calculate material advantage
+  const calculateMaterialAdvantage = useCallback(() => {
+    const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
+    let whiteAdvantage = 0
+    let blackAdvantage = 0
+
+    capturedPieces.white.forEach((piece) => {
+      whiteAdvantage += PIECE_VALUES[piece.toLowerCase() as keyof typeof PIECE_VALUES] || 0
+    })
+
+    capturedPieces.black.forEach((piece) => {
+      blackAdvantage += PIECE_VALUES[piece.toUpperCase() as keyof typeof PIECE_VALUES] || 0
+    })
+
+    return { white: whiteAdvantage, black: blackAdvantage }
+  }, [gameState.board.capturedPieces])
+
+  // Render captured pieces
+  const renderCapturedPieces = useCallback(
+    (color: "white" | "black") => {
+      const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
+      const pieces = capturedPieces[color] || []
+      if (pieces.length === 0) return null
+
       const pieceCounts: { [key: string]: number } = {}
-      pocket.forEach((piece) => {
-        const pieceType = (piece as PocketPieceStandard).type || (piece as string) // Handle both potential types
+      pieces.forEach((piece) => {
+        const pieceType = color === "white" ? piece.toLowerCase() : piece.toUpperCase()
         pieceCounts[pieceType] = (pieceCounts[pieceType] || 0) + 1
       })
 
       return (
-        <View style={styles.pocketPanel}>
-          <Text style={styles.pocketLabel}>{color === "white" ? "White Pocket" : "Black Pocket"}</Text>
-          <View style={styles.pocketPieces}>
-            {Object.entries(pieceCounts).map(([pieceType, count]) => (
-              <TouchableOpacity
-                key={pieceType}
-                style={[
-                  styles.pocketPiece,
-                  selectedPocketPiece === pieceType && selectedPocket === color ? styles.selectedPocketPiece : null,
-                ]}
-                onPress={() => {
-                  setSelectedPocketPiece(pieceType)
-                  setSelectedPocket(color)
-                }}
-                disabled={!isMyTurnForPocket}
-              >
-                <Text style={styles.pieceText}>{PIECE_SYMBOLS[pieceType]}</Text>
-                {count > 1 && <Text style={styles.pocketCount}>x{count}</Text>}
-              </TouchableOpacity>
-            ))}
-          </View>
+        <View style={styles.capturedPieces}>
+          {Object.entries(pieceCounts).map(([piece, count]) => (
+            <View key={piece} style={styles.capturedPieceGroup}>
+              <Text style={styles.capturedPiece}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>
+              {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
+            </View>
+          ))}
         </View>
       )
-    }
-  }
+    },
+    [gameState.board.capturedPieces],
+  )
 
-  // Board rendering
-  function renderSquare(file: string, rank: string) {
-    const square = `${file}${rank}`
-    const isLight = (FILES.indexOf(file) + Number.parseInt(rank)) % 2 === 0
-    const isSelected = selectedSquare === square
-    const isPossibleMove = possibleMoves.includes(square)
-    const piece = getPieceAt(square)
+  // Render pocket panel
+  const renderPocketPanel = useCallback(
+    (color: "white" | "black") => {
+      const pocketPieces = gameState.board.pocketPanel?.[color] || gameState.gameState?.pocketPanel?.[color] || []
+      const pocketTimers = isWithTimerVariant() ? localPocketTimers[color] || [] : []
 
-    return (
-      <TouchableOpacity
-        key={square}
-        style={[
-          styles.square,
-          { width: squareSize, height: squareSize, backgroundColor: isLight ? "#F0D9B5" : "#769656" },
-          isSelected && styles.selectedSquare,
-          isPossibleMove && styles.possibleMoveSquare,
-        ]}
-        onPress={() => handleSquarePress(square)}
-      >
-        {piece && <Text style={styles.pieceText}>{PIECE_SYMBOLS[piece]}</Text>}
-        {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
-        {isPossibleMove && piece && <View style={styles.captureIndicator} />}
-      </TouchableOpacity>
-    )
-  }
+      if (pocketPieces.length === 0) {
+        return (
+          <View style={[styles.pocketPanel, { width: pocketPanelWidth }]}>
+            <Text style={styles.pocketTitle}>
+              {color === "white" ? "♔" : "♚"} {color.toUpperCase()}
+            </Text>
+            <Text style={styles.emptyPocketText}>No pieces</Text>
+          </View>
+        )
+      }
+
+      // Group pieces by type
+      const pieceCounts: { [key: string]: number } = {}
+      pocketPieces.forEach((piece) => {
+        pieceCounts[piece] = (pieceCounts[piece] || 0) + 1
+      })
+
+      return (
+        <View style={[styles.pocketPanel, { width: pocketPanelWidth }]}>
+          <Text style={styles.pocketTitle}>
+            {color === "white" ? "♔" : "♚"} {color.toUpperCase()}
+          </Text>
+          <ScrollView style={styles.pocketScroll} showsVerticalScrollIndicator={false}>
+            {Object.entries(pieceCounts).map(([piece, count]) => {
+              const pieceSymbol =
+                color === "white"
+                  ? PIECE_SYMBOLS[piece.toUpperCase() as keyof typeof PIECE_SYMBOLS]
+                  : PIECE_SYMBOLS[piece.toLowerCase() as keyof typeof PIECE_SYMBOLS]
+
+              // Find timer for this piece (if withTimer variant)
+              const timer = pocketTimers.find((t) => t.piece === piece)
+              const isSelected = selectedPocketPiece === piece
+              const canSelect = isMyTurn && playerColor === color
+
+              return (
+                <TouchableOpacity
+                  key={piece}
+                  onPress={() => canSelect && handlePocketPiecePress(piece)}
+                  disabled={!canSelect}
+                  style={[
+                    styles.pocketPiece,
+                    isSelected && styles.selectedPocketPiece,
+                    !canSelect && styles.disabledPocketPiece,
+                  ]}
+                >
+                  <Text style={styles.pocketPieceSymbol}>{pieceSymbol}</Text>
+                  {count > 1 && (
+                    <View style={styles.pocketPieceCount}>
+                      <Text style={styles.pocketPieceCountText}>{count}</Text>
+                    </View>
+                  )}
+                  {timer && isWithTimerVariant() && (
+                    <View style={styles.pocketTimer}>
+                      <Text style={styles.pocketTimerText}>{formatPocketTime(timer.remainingTime)}s</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )
+            })}
+          </ScrollView>
+          {isWithTimerVariant() && <Text style={styles.timerWarning}>⏱️ 10s limit</Text>}
+        </View>
+      )
+    },
+    [
+      gameState.board.pocketPanel,
+      gameState.gameState?.pocketPanel,
+      localPocketTimers,
+      isWithTimerVariant,
+      selectedPocketPiece,
+      isMyTurn,
+      playerColor,
+      handlePocketPiecePress,
+      formatPocketTime,
+      pocketPanelWidth,
+    ],
+  )
+
+  // Render square
+  const renderSquare = useCallback(
+    (file: string, rank: string) => {
+      const square = `${file}${rank}`
+      const isLight = (FILES.indexOf(file) + Number.parseInt(rank)) % 2 === 0
+      const isSelected = selectedSquare === square
+      const isPossibleMove = possibleMoves.includes(square)
+      const isPossibleDrop = possibleDrops.includes(square)
+
+      console.log(
+        `Square ${square}: isSelected=${isSelected}, isPossibleMove=${isPossibleMove}, isPossibleDrop=${isPossibleDrop}, possibleMoves=${JSON.stringify(possibleMoves)}`,
+      )
+
+      // Check for last move highlighting
+      let lastMoveObj = null
+      if (gameState.board && Array.isArray(gameState.board.moveHistory) && gameState.board.moveHistory.length > 0) {
+        lastMoveObj = gameState.board.moveHistory[gameState.board.moveHistory.length - 1]
+      } else if (
+        gameState.lastMove &&
+        typeof gameState.lastMove === "object" &&
+        gameState.lastMove.from &&
+        gameState.lastMove.to
+      ) {
+        lastMoveObj = gameState.lastMove
+      }
+
+      let isLastMove = false
+      if (lastMoveObj && lastMoveObj.from && lastMoveObj.to) {
+        isLastMove = lastMoveObj.from === square || lastMoveObj.to === square
+      }
+
+      const piece = getPieceAt(square)
+
+      // Determine border styling
+      let borderColor = "transparent"
+      let borderWidth = 0
+
+      if (isPossibleDrop) {
+        borderColor = "#a855f7" // Purple for drops
+        borderWidth = 3
+      } else if (isPossibleMove) {
+        borderColor = "#4ade80" // Green for moves
+        borderWidth = 3
+      } else if (isSelected) {
+        borderColor = "#60a5fa" // Blue for selected
+        borderWidth = 3
+      } else if (isLastMove) {
+        borderColor = "rgba(251, 191, 36, 0.7)" // Yellow for last move, slightly transparent
+        borderWidth = 2
+      }
+
+      return (
+        <TouchableOpacity
+          key={square}
+          onPress={() => handleSquarePress(square)}
+          style={[
+            styles.square,
+            {
+              width: squareSize,
+              height: squareSize,
+              backgroundColor: isLight ? "#F0D9B5" : "#B58863",
+              borderColor,
+              borderWidth,
+            },
+          ]}
+        >
+          {/* Coordinate labels */}
+          {file === "a" && (
+            <Text style={[styles.coordinateLabel, styles.rankLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
+              {rank}
+            </Text>
+          )}
+          {rank === "1" && (
+            <Text style={[styles.coordinateLabel, styles.fileLabel, { color: isLight ? "#B58863" : "#F0D9B5" }]}>
+              {file}
+            </Text>
+          )}
+
+          {/* Piece */}
+          {piece && (
+            <Text
+              style={[
+                styles.piece,
+                {
+                  fontSize: Math.min(squareSize * 0.7, isTablet ? 32 : isSmallScreen ? 20 : 24),
+                },
+              ]}
+            >
+              {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
+            </Text>
+          )}
+
+          {/* Move indicators */}
+          {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
+          {isPossibleMove && piece && <View style={styles.captureIndicator} />}
+          {isPossibleDrop && <View style={styles.dropIndicator} />}
+        </TouchableOpacity>
+      )
+    },
+    [
+      selectedSquare,
+      possibleMoves,
+      possibleDrops,
+      gameState.board,
+      gameState.lastMove,
+      getPieceAt,
+      handleSquarePress,
+      squareSize,
+      isTablet,
+      isSmallScreen,
+    ],
+  )
 
   function renderBoard() {
     const files = boardFlipped ? [...FILES].reverse() : FILES
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
-
     return (
       <View style={styles.boardContainer}>
         <View style={styles.board}>
@@ -763,36 +1323,84 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         </View>
       </View>
     )
-  }
+  }, [boardFlipped, renderSquare, boardSize])
 
-  // Player info
-  function renderPlayerInfo(color: "white" | "black", isTop: boolean) {
-    const player = gameState.players[color]
-    if (!player) return null
+  // Render player info
+  const renderPlayerInfo = useCallback(
+    (color: "white" | "black") => {
+      const player = gameState.players[color]
+      if (!player) {
+        return (
+          <View style={styles.playerInfoContainer}>
+            <Text style={styles.playerName}>Unknown Player</Text>
+          </View>
+        )
+      }
 
-    const timer = localTimers[color]
-    const isActivePlayer = gameState.board.activeColor === color
-    const isMe = playerColor === color
+      const timer = safeTimerValue(localTimers[color])
+      const isActive = gameState.board.activeColor === color && gameState.status === "active"
+      const isMe = playerColor === color
+      const materialAdvantage = calculateMaterialAdvantage()
+      const advantage = materialAdvantage[color] - materialAdvantage[color === "white" ? "black" : "white"]
 
-    return (
-      <View style={[styles.playerInfoBlock, isTop ? styles.topPlayerBlock : styles.bottomPlayerBlock]}>
-        <View style={styles.playerDetails}>
-          <Text style={styles.playerName}>
-            {player.username} {isMe && <Text style={styles.youIndicator}>YOU</Text>}
-          </Text>
-          <Text style={styles.playerRating}>({player.rating})</Text>
+      return (
+        <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
+          <View style={styles.playerHeader}>
+            <View style={styles.playerDetails}>
+              <View style={styles.playerNameRow}>
+                <Text
+                  style={[
+                    styles.playerColorIndicator,
+                    {
+                      color: color === "white" ? "#fff" : "#000",
+                      backgroundColor: color === "white" ? "#000" : "#fff",
+                    },
+                  ]}
+                >
+                  {color === "white" ? "♔" : "♚"}
+                </Text>
+                <Text style={[styles.playerName, isActive && styles.activePlayerName]}>{player.username}</Text>
+                {isMe && <Text style={styles.youIndicator}>(You)</Text>}
+              </View>
+              <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
+              {advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
+            </View>
+            <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
+              <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
+            </View>
+          </View>
+          {renderCapturedPieces(color)}
+          {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
         </View>
-        <View style={[styles.timerContainer, isActivePlayer && styles.activeTimer]}>
-          <Text style={styles.timer}>{formatTime(timer)}</Text>
-        </View>
-      </View>
-    )
-  }
+      )
+    },
+    [
+      gameState.players,
+      gameState.board.activeColor,
+      gameState.status,
+      playerColor,
+      localTimers,
+      calculateMaterialAdvantage,
+      formatTime,
+      renderCapturedPieces,
+    ],
+  )
 
-  // Move history modal
-  function renderMoveHistory() {
-    if (!showMoveHistory) return null
-    const moves = moveHistory
+  // Update the renderGameInfo function to show connection status:
+  const renderGameInfo = useCallback(() => {
+    const gs = gameState.gameState || {}
+
+    if (gameState.status === "ended" || gs.gameEnded) {
+      return (
+        <View style={styles.gameStatusContainer}>
+          <Text style={styles.gameOverText}>🏁 Game Ended 🏁</Text>
+        </View>
+      )
+    }
+
+    const activePlayerName = gameState.players[gameState.board.activeColor]?.username || gameState.board.activeColor
+    const isMyTurnActive = gameState.board.activeColor === playerColor
+    const variantDisplay = isWithTimerVariant() ? "Crazyhouse (Timer)" : "Crazyhouse"
 
     return (
       <Modal visible={showMoveHistory} transparent animationType="slide">
@@ -815,46 +1423,37 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           </View>
         </View>
       </Modal>
-    )
-  }
 
-  // Promotion modal
-  function renderPromotionModal() {
-    if (!promotionModal || !promotionModal.visible) return null
-
-    return (
-      <Modal visible={promotionModal.visible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.promotionModal}>
-            <Text style={styles.promotionTitle}>Choose Promotion Piece</Text>
-            <View style={styles.promotionOptions}>
-              {promotionModal.options.map((p) => (
-                <TouchableOpacity key={p} style={styles.promotionOption} onPress={() => handlePromotionSelect(p)}>
-                  <Text style={styles.promotionPiece}>
-                    {
-                      PIECE_SYMBOLS[
-                        (playerColor === "white" ? p.toUpperCase() : p.toLowerCase()) as keyof typeof PIECE_SYMBOLS
-                      ]
-                    }
-                  </Text>
-                </TouchableOpacity>
-              ))}
+      {/* Promotion Modal */}
+      {promotionModal && (
+        <Modal visible={promotionModal.visible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.promotionModal}>
+              <Text style={styles.promotionTitle}>Choose Promotion</Text>
+              <View style={styles.promotionOptions}>
+                {promotionModal.options.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={styles.promotionOption}
+                    onPress={() => handlePromotionSelect(option)}
+                  >
+                    <Text style={styles.promotionPiece}>
+                      {
+                        PIECE_SYMBOLS[
+                          (playerColor === "white" ? option.toUpperCase() : option) as keyof typeof PIECE_SYMBOLS
+                        ]
+                      }
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-            <TouchableOpacity onPress={() => setPromotionModal(null)} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
-    )
-  }
+        </Modal>
+      )}
 
-  // Game end modal
-  function renderGameEndModal() {
-    if (!showGameEndModal) return null
-
-    return (
-      <Modal visible={showGameEndModal} transparent animationType="fade">
+      {/* Game End Modal */}
+      <Modal visible={showGameEndModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.gameEndModal}>
             <Text style={styles.gameEndTitle}>
@@ -864,56 +1463,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           </View>
         </View>
       </Modal>
-    )
-  }
-
-  // Flip board
-  function handleFlipBoard() {
-    setBoardFlipped(!boardFlipped)
-  }
-
-  const opponentColor = playerColor === "white" ? "black" : "white"
-
-  return (
-    <View style={styles.container}>
-      {renderPlayerInfo(opponentColor, true)}
-      {renderPocketPanel(opponentColor)}
-      {renderBoard()}
-      {renderPocketPanel(playerColor)}
-      {renderPlayerInfo(playerColor, false)}
-
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
-          <Text style={styles.bottomBarIcon}>≡</Text>
-          <Text style={styles.bottomBarLabel}>Moves</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={handleFlipBoard}>
-          <Text style={styles.bottomBarIcon}>⟲</Text>
-          <Text style={styles.bottomBarLabel}>Flip</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.bottomBarButton}
-          onPress={() => {
-            if (socket && gameState.status === "active") socket.emit("game:resign")
-          }}
-        >
-          <Text style={styles.bottomBarIcon}>✕</Text>
-          <Text style={styles.bottomBarLabel}>Resign</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.bottomBarButton}
-          onPress={() => {
-            if (socket && gameState.status === "active") socket.emit("game:offerDraw")
-          }}
-        >
-          <Text style={styles.bottomBarIcon}>½</Text>
-          <Text style={styles.bottomBarLabel}>Draw</Text>
-        </TouchableOpacity>
-      </View>
-
-      {renderMoveHistory()}
-      {renderGameEndModal()}
-      {renderPromotionModal()}
     </View>
   )
 }
@@ -959,126 +1508,252 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#333",
+    marginBottom: 8,
   },
-  topPlayerBlock: { paddingTop: 20 },
-  bottomPlayerBlock: { borderTopWidth: 1, borderBottomWidth: 0, borderTopColor: "#333", paddingBottom: 20 },
-  playerDetails: { flex: 1 },
-  playerName: { color: "#fff", fontSize: 18, fontWeight: "500" },
-  youIndicator: { color: "#90EE90", fontSize: 14, fontWeight: "bold", marginLeft: 5 },
-  playerRating: { color: "#999", fontSize: 14 },
-  timerContainer: {
-    backgroundColor: "#1a1a1a",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    minWidth: 70,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#333",
+  playerDetails: {
+    flex: 1,
   },
-  activeTimer: { borderColor: "#90EE90" },
-  timer: { color: "#fff", fontWeight: "bold", fontFamily: "monospace", fontSize: 20 },
-  pocketPanel: { flexDirection: "row", alignItems: "center", marginVertical: 8 },
-  pocketLabel: { color: "#fff", marginRight: 8 },
-  pocketPieces: { flexDirection: "row" },
-  pocketPiece: { backgroundColor: "#333", borderRadius: 4, padding: 8, marginHorizontal: 2 },
-  selectedPocketPiece: { backgroundColor: "#60a5fa" },
-  pocketCount: { color: "#a1a1aa", fontSize: 12, marginLeft: 2 },
-  dropTimerText: { color: "#fff", fontSize: 12, marginTop: 4, fontFamily: "monospace" },
-  frozenPocketPiece: {
-    backgroundColor: "#555", // A different background for frozen pieces
-    borderRadius: 4,
-    padding: 8,
-    marginHorizontal: 2,
-    opacity: 0.6, // Make them slightly transparent
-  },
-  bottomBar: {
+  playerNameRow: {
     flexDirection: "row",
-    backgroundColor: "#1a1a1a",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    justifyContent: "space-around",
     alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#333",
-    width: "100%",
   },
-  bottomBarButton: {
+  playerColorIndicator: {
+    fontSize: 16,
+    marginRight: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    textAlign: "center",
+    lineHeight: 24,
+  },
+  playerName: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  activePlayerName: {
+    color: "#4ade80",
+  },
+  youIndicator: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  playerRating: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  materialAdvantage: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginTop: 2,
+  },
+  timerContainer: {
+    backgroundColor: "#555",
+    padding: 8,
+    borderRadius: 6,
+  },
+  activeTimerContainer: {
+    backgroundColor: "#4ade80",
+  },
+  timerText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  activeTimerText: {
+    color: "#000",
+  },
+  capturedPieces: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8,
+  },
+  capturedPieceGroup: {
+    flexDirection: "row",
     alignItems: "center",
+    marginRight: 8,
+  },
+  capturedPiece: {
+    fontSize: 14,
+    color: "#a1a1aa",
+  },
+  capturedCount: {
+    color: "#a1a1aa",
+    fontSize: 10,
+    marginLeft: 2,
+  },
+  yourTurnIndicator: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  gameStatusContainer: {
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  gameOverText: {
+    color: "#ef4444",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  turnIndicator: {
+    color: "#a1a1aa",
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  myTurnIndicator: {
+    color: "#4ade80",
+  },
+  variantName: {
+    color: "#60a5fa",
+    fontSize: 12,
+  },
+  controlsContainer: {
+    flexDirection: "row",
     justifyContent: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    minWidth: 60,
+    alignItems: "center",
+    marginTop: 16,
+    gap: 8,
   },
-  bottomBarIcon: { fontSize: 24, marginBottom: 4, color: "#999", fontWeight: "bold" },
-  bottomBarLabel: { color: "#fff", fontSize: 12, fontWeight: "500" },
+  historyButton: {
+    backgroundColor: "#60a5fa",
+    padding: 8,
+    borderRadius: 6,
+  },
+  historyButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 16,
   },
   moveHistoryModal: {
-    backgroundColor: "#222",
-    borderRadius: 12,
-    width: "90%",
-    maxWidth: 400,
-    maxHeight: "70%",
-    borderWidth: 1,
-    borderColor: "#555",
+    backgroundColor: "#333",
+    borderRadius: 8,
+    padding: 16,
+    width: "80%",
+    maxHeight: "60%",
   },
   moveHistoryHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#555",
+    marginBottom: 16,
   },
-  moveHistoryTitle: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  closeButton: { padding: 8 },
-  closeButtonText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  moveHistoryScroll: { flex: 1, padding: 16 },
-  moveRow: { flexDirection: "row", marginBottom: 8, alignItems: "center" },
-  moveNumber: { color: "#999", fontSize: 14, width: 30, fontWeight: "bold" },
-  moveText: { color: "#fff", fontSize: 14, width: 60, marginHorizontal: 8 },
-  gameEndModal: {
-    backgroundColor: "#222",
-    borderRadius: 16,
-    padding: 24,
+  moveHistoryTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  closeButton: {
+    backgroundColor: "#ef4444",
+    padding: 8,
+    borderRadius: 4,
+  },
+  closeButtonText: {
+    color: "#fff",
+    fontSize: 12,
+  },
+  moveHistoryScroll: {
+    maxHeight: 200,
+  },
+  emptyHistoryText: {
+    color: "#666",
+    textAlign: "center",
+    fontStyle: "italic",
+  },
+  moveRow: {
+    flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-    maxWidth: "90%",
+    marginBottom: 4,
   },
-  gameEndTitle: { fontSize: 24, fontWeight: "bold", textAlign: "center", marginBottom: 16, color: "#fff" },
-  gameEndMessage: { fontSize: 16, textAlign: "center", marginBottom: 20, color: "#fff", lineHeight: 22 },
+  moveNumber: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    width: 30,
+  },
+  moveText: {
+    color: "#fff",
+    fontSize: 12,
+  },
   promotionModal: {
-    backgroundColor: "#222",
-    borderRadius: 12,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-  },
-  promotionTitle: { color: "#fff", fontSize: 18, fontWeight: "bold", marginBottom: 20, textAlign: "center" },
-  promotionOptions: { flexDirection: "row", justifyContent: "center", marginBottom: 20, flexWrap: "wrap" },
-  promotionOption: {
-    margin: 8,
-    padding: 12,
-    backgroundColor: "#F0D9B5",
+    backgroundColor: "#333",
     borderRadius: 8,
-    minWidth: 50,
-    minHeight: 50,
-    justifyContent: "center",
+    padding: 16,
     alignItems: "center",
   },
-  promotionPiece: { fontSize: 28, textAlign: "center", color: "#000" },
-  cancelButton: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: "#666", borderRadius: 8 },
-  cancelButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  promotionTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 16,
+  },
+  promotionOptions: {
+    flexDirection: "row",
+    gap: 16,
+  },
+  promotionOption: {
+    backgroundColor: "#60a5fa",
+    padding: 12,
+    borderRadius: 8,
+  },
+  promotionPiece: {
+    fontSize: 24,
+    color: "#fff",
+  },
+  gameEndModal: {
+    backgroundColor: "#333",
+    borderRadius: 8,
+    padding: 16,
+    alignItems: "center",
+    width: "80%",
+  },
+  gameEndMessage: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  gameEndReason: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  gameEndMove: {
+    color: "#a1a1aa",
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  gameEndWinner: {
+    color: "#4ade80",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginBottom: 16,
+  },
+  menuButton: {
+    backgroundColor: "#60a5fa",
+    padding: 12,
+    borderRadius: 8,
+  },
+  menuButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  connectionStatus: {
+    fontSize: 12,
+    fontWeight: "bold",
+    marginBottom: 4,
+    color: "#fff", // Default color, will be overridden by red/green
+  },
 })

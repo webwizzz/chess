@@ -1,9 +1,11 @@
 "use client"
+
 import { useRouter } from "expo-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../utils/socketManager"
+import { getPieceComponent } from "./chessPieces"
 
 // Types
 interface Player {
@@ -128,21 +130,6 @@ interface DecayState {
   [square: string]: DecayTimer
 }
 
-const PIECE_SYMBOLS = {
-  r: "♜",
-  n: "♞",
-  b: "♝",
-  q: "♛",
-  k: "♚",
-  p: "♟",
-  R: "♖",
-  N: "♘",
-  B: "♗",
-  Q: "♕",
-  K: "♔",
-  P: "♙",
-}
-
 const PIECE_VALUES = {
   p: 1,
   P: 1,
@@ -169,14 +156,28 @@ const QUEEN_INITIAL_DECAY_TIME = 25000 // 25 seconds
 const MAJOR_PIECE_INITIAL_DECAY_TIME = 20000 // 20 seconds
 const DECAY_TIME_INCREMENT = 2000 // +2 seconds per additional move
 
-// Global sizing constants for styles
+// Responsive sizing constants
 const screenWidth = Dimensions.get("window").width
 const screenHeight = Dimensions.get("window").height
 const isTablet = Math.min(screenWidth, screenHeight) > 600
-const isSmallScreen = Math.min(screenWidth, screenHeight) < 400
-const containerPadding = isTablet ? 24 : isSmallScreen ? 12 : 16
-const boardSize = Math.min(screenWidth - containerPadding * 2, screenHeight * 0.5, isTablet ? 500 : 380)
+const isSmallScreen = screenWidth < 380
+const isVerySmallScreen = screenWidth < 320
+
+// Improved responsive sizing for better centering
+const horizontalPadding = isSmallScreen ? 8 : isTablet ? 20 : 12
+const boardSize = screenWidth - horizontalPadding * 2
 const squareSize = boardSize / 8
+
+// Dynamic sizing based on screen size with better proportions
+const playerInfoHeight = isSmallScreen ? 70 : isTablet ? 100 : 85
+const gameStatusHeight = isSmallScreen ? 35 : 45
+const bottomBarHeight = isSmallScreen ? 65 : 75
+const decayTimerFontSize = isSmallScreen ? 8 : 10
+const pieceFontSize = squareSize * (isSmallScreen ? 0.6 : isTablet ? 0.7 : 0.65)
+
+// Improved spacing constants
+const verticalSpacing = isSmallScreen ? 8 : isTablet ? 16 : 12
+const componentSpacing = isSmallScreen ? 6 : isTablet ? 12 : 8
 
 // Format decay timer in MM:SS format
 const formatDecayTimeMinutes = (milliseconds: number): string => {
@@ -185,6 +186,12 @@ const formatDecayTimeMinutes = (milliseconds: number): string => {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
   return `${minutes}:${seconds.toString().padStart(2, "0")}`
+}
+
+// FIXED: Move safeTimerValue outside component to prevent re-renders
+function safeTimerValue(val: any): number {
+  const n = Number(val)
+  return isNaN(n) || n === undefined || n === null ? 0 : Math.max(0, n)
 }
 
 export default function DecayChessGame({ initialGameState, userId, onNavigateToMenu }: DecayChessGameProps) {
@@ -213,6 +220,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     white: {},
     black: {},
   })
+
   const [frozenPieces, setFrozenPieces] = useState<{
     white: Set<string>
     black: Set<string>
@@ -247,15 +255,11 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   const decayTimerRef = useRef<any>(null)
   const navigationTimeoutRef = useRef<any>(null)
 
-  // Timer sync state - FIXED
-  function safeTimerValue(val: any): number {
-    const n = Number(val)
-    return isNaN(n) || n === undefined || n === null ? 0 : Math.max(0, n)
-  }
   const [localTimers, setLocalTimers] = useState<{ white: number; black: number }>({
     white: safeTimerValue(initialGameState.timeControl.timers.white),
     black: safeTimerValue(initialGameState.timeControl.timers.black),
   })
+
   const lastServerSync = useRef<{
     white: number
     black: number
@@ -290,12 +294,15 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       const fileIndex = FILES.indexOf(square[0])
       const rankIndex = RANKS.indexOf(square[1])
       if (fileIndex === -1 || rankIndex === -1) return null
+
       const fen = gameState.board.fen || gameState.board.position
       if (!fen) return null
+
       // Only use the piece placement part (before first space)
       const piecePlacement = fen.split(" ")[0]
       const rows = piecePlacement.split("/")
       if (rows.length !== 8) return null
+
       const row = rows[rankIndex]
       let col = 0
       for (let i = 0; i < row.length; i++) {
@@ -381,12 +388,15 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     (square: string, piece: string) => {
       const pieceColor = getPieceColor(piece)
       const isQueenPiece = isQueen(piece)
+
       setDecayState((prev) => {
         const newState = { ...prev }
         const colorState = { ...newState[pieceColor] }
         const existingTimer = colorState[square]
+
         let decayTime: number
         let moveCount: number
+
         if (existingTimer) {
           // Increment by 2 seconds, cap at 25s
           decayTime = Math.min(existingTimer.timeLeft + DECAY_TIME_INCREMENT, 25000)
@@ -396,19 +406,20 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           decayTime = isQueenPiece ? QUEEN_INITIAL_DECAY_TIME : MAJOR_PIECE_INITIAL_DECAY_TIME
           moveCount = 1
         }
+
         colorState[square] = {
           timeLeft: decayTime,
           isActive: true,
           moveCount,
           pieceSquare: square,
         }
+
         newState[pieceColor] = colorState
         return newState
       })
+
       console.log(
-        `[DECAY] Started decay timer for ${piece} at ${square}: ${
-          isQueenPiece ? QUEEN_INITIAL_DECAY_TIME : MAJOR_PIECE_INITIAL_DECAY_TIME
-        }ms`,
+        `[DECAY] Started decay timer for ${piece} at ${square}: ${isQueenPiece ? QUEEN_INITIAL_DECAY_TIME : MAJOR_PIECE_INITIAL_DECAY_TIME}ms`,
       )
     },
     [getPieceColor, isQueen],
@@ -422,6 +433,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       newFrozen[color] = new Set([...newFrozen[color], square])
       return newFrozen
     })
+
     // Remove the decay timer when piece is frozen
     setDecayState((prev) => {
       const newState = { ...prev }
@@ -437,9 +449,11 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     (from: string, to: string, piece: string) => {
       const pieceColor = getPieceColor(piece)
       const opponentColor = pieceColor === "white" ? "black" : "white"
+
       setDecayState((prev) => {
         const newState = { ...prev }
         const colorState = { ...newState[pieceColor] }
+
         // If the piece being moved has a decay timer, move it to the new square
         if (colorState[from]) {
           colorState[to] = {
@@ -450,22 +464,27 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           delete colorState[from]
           console.log(`[DECAY] Moved timer from ${from} to ${to} for ${piece}`)
         }
+
         newState[pieceColor] = colorState
         return newState
       })
+
       setFrozenPieces((prev) => {
         const newFrozen = { ...prev }
+
         // --- FIX: Always remove opponent's frozen state from the destination square ---
         if (newFrozen[opponentColor].has(to)) {
           newFrozen[opponentColor] = new Set(newFrozen[opponentColor])
           newFrozen[opponentColor].delete(to)
         }
+
         // Only transfer frozen state if the moving piece was frozen
         if (newFrozen[pieceColor].has(from)) {
           newFrozen[pieceColor] = new Set(newFrozen[pieceColor])
           newFrozen[pieceColor].delete(from)
           newFrozen[pieceColor].add(to)
         }
+
         return newFrozen
       })
     },
@@ -477,6 +496,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     (from: string, to: string, piece?: string) => {
       const movedPiece = piece || getPieceAt(from)
       if (!movedPiece) return
+
       const pieceColor = getPieceColor(movedPiece)
 
       // Move the piece in decay state first
@@ -486,6 +506,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       if (isQueen(movedPiece)) {
         // Mark that this color's queen has moved
         setQueenMoved((prev) => ({ ...prev, [pieceColor]: true }))
+
         // Start or update decay timer for queen
         startDecayTimer(to, movedPiece)
         console.log(`[DECAY] Queen moved for ${pieceColor}, decay timer started/updated`)
@@ -498,10 +519,12 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           const rank = RANKS[Math.floor(i / 8)]
           return `${file}${rank}`
         })
+
         const queenOnBoard = queenSquares.some((sq) => {
           const piece = getPieceAt(sq)
           return piece && isQueen(piece) && getPieceColor(piece) === pieceColor
         })
+
         const hasQueenFrozen = Array.from(frozenPieces[pieceColor]).some((square) => {
           const piece = getPieceAt(square)
           return piece && isQueen(piece)
@@ -531,18 +554,23 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     if (decayTimerRef.current) {
       clearInterval(decayTimerRef.current)
     }
+
     if (gameState.status !== "active") {
       return
     }
+
     console.log("[DECAY] Setting up decay timer management")
+
     decayTimerRef.current = setInterval(() => {
       setDecayState((prev) => {
         const newState = { ...prev }
         let hasChanges = false
+
         // Handle both players' timers
         ;["white", "black"].forEach((color) => {
           const colorState = { ...newState[color as "white" | "black"] }
           const isPlayerTurn = gameState.board.activeColor === color
+
           Object.keys(colorState).forEach((square) => {
             const timer = colorState[square]
             if (timer && timer.timeLeft > 0 && timer.isActive) {
@@ -550,10 +578,12 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
               if (isPlayerTurn) {
                 timer.timeLeft = Math.max(0, timer.timeLeft - 100)
                 hasChanges = true
+
                 // Log timer updates for debugging
                 if (timer.timeLeft % 1000 === 0) {
                   console.log(`[DECAY] ${color} ${square}: ${Math.floor(timer.timeLeft / 1000)}s remaining`)
                 }
+
                 // Freeze piece if timer expires
                 if (timer.timeLeft <= 0) {
                   console.log(`[DECAY] Timer expired for piece at ${square}`)
@@ -562,8 +592,10 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
               }
             }
           })
+
           newState[color as "white" | "black"] = colorState
         })
+
         return hasChanges ? newState : prev
       })
     }, 100) // Update every 100ms
@@ -585,6 +617,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       details?: { moveSan?: string; moveMaker?: string; winnerName?: string | null },
     ) => {
       console.log("[GAME END] Result:", result, "Winner:", winner, "Reason:", endReason)
+
       // Stop all timers
       if (timerRef.current) {
         clearInterval(timerRef.current)
@@ -596,6 +629,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       // Determine if current player won
       let playerWon: boolean | null = null
       let message = ""
+
       if (result === "checkmate") {
         if (winner === playerColor) {
           playerWon = true
@@ -680,6 +714,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       setSocket(gameSocket)
       console.log("Connected to game socket")
     }
+
     if (!gameSocket) {
       console.error("Failed to connect to game socket")
       Alert.alert("Connection Error", "Failed to connect to game socket. Please try again.")
@@ -720,6 +755,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     if (timerRef.current) {
       clearInterval(timerRef.current)
     }
+
     if (gameState.status !== "active" || gameState.gameState?.gameEnded) {
       return
     }
@@ -739,6 +775,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       turnStartTime: gameState.board.turnStartTimestamp || now,
       isFirstMove: isFirstMove,
     }
+
     console.log("[TIMER] Setting up timer for active color:", gameState.board.activeColor)
     console.log("[TIMER] Move count:", moveCount, "Is first move:", isFirstMove)
 
@@ -776,6 +813,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           handleGameEnd("timeout", "white", "Black ran out of time")
           return { white: newWhite, black: 0 }
         }
+
         return { white: newWhite, black: newBlack }
       })
     }, 100)
@@ -797,7 +835,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     handleGameEnd,
   ])
 
-  // Socket event handlers
+  // Socket event handlers (keeping all the existing logic)
   const handleGameMove = useCallback(
     (data: any) => {
       console.log("[MOVE] Move received:", data)
@@ -811,11 +849,13 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         // Extract timer values from the response
         let newWhiteTime = safeTimerValue(gameState.timeControl.timers.white)
         let newBlackTime = safeTimerValue(gameState.timeControl.timers.black)
+
         if (data.gameState.timeControl?.timers?.white !== undefined) {
           newWhiteTime = safeTimerValue(data.gameState.timeControl.timers.white)
         } else if (data.gameState.board?.whiteTime !== undefined) {
           newWhiteTime = safeTimerValue(data.gameState.board.whiteTime)
         }
+
         if (data.gameState.timeControl?.timers?.black !== undefined) {
           newBlackTime = safeTimerValue(data.gameState.timeControl.timers.black)
         } else if (data.gameState.board?.blackTime !== undefined) {
@@ -842,18 +882,22 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         ) {
           const result = data.gameState.gameState?.result || data.gameState.result || "unknown"
           let winner = data.gameState.gameState?.winner || data.gameState.winner
+
           if (result === "checkmate") {
             const checkmatedPlayer = data.gameState.board.activeColor
             winner = checkmatedPlayer === "white" ? "black" : "white"
           }
+
           const endReason = data.gameState.gameState?.endReason || data.gameState.endReason || result
           const lastMove = data.gameState.move || data.move
           const moveMaker = lastMove?.color || "unknown"
           const moveSan = lastMove?.san || `${lastMove?.from || "?"}->${lastMove?.to || "?"}`
+
           let winnerName = null
           if (winner && data.gameState.players && data.gameState.players[winner]) {
             winnerName = data.gameState.players[winner].username
           }
+
           handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName })
           return
         }
@@ -886,6 +930,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           white: newWhiteTime,
           black: newBlackTime,
         })
+
         setMoveHistory(data.gameState.moves || [])
         setSelectedSquare(null)
         setPossibleMoves([])
@@ -911,6 +956,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   const handlePossibleMoves = useCallback((data: { square: string; moves: any[] }) => {
     console.log("Possible moves (raw):", data.moves)
     let moves: string[] = []
+
     if (Array.isArray(data.moves) && data.moves.length > 0) {
       if (typeof data.moves[0] === "object" && data.moves[0].to) {
         moves = data.moves.map((m: any) => m.to)
@@ -920,6 +966,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         moves = data.moves
       }
     }
+
     console.log("Possible moves (dest squares):", moves)
     setPossibleMoves(moves)
   }, [])
@@ -963,6 +1010,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
             },
           },
         }))
+
         setIsMyTurn(data.gameState.board.activeColor === playerColor)
       }
     },
@@ -972,6 +1020,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   const handleTimerUpdate = useCallback(
     (data: any) => {
       console.log("Timer update:", data)
+
       // Check for game ending in timer update
       if (data.gameEnded || data.shouldNavigateToMenu) {
         const result = data.endReason || "timeout"
@@ -983,6 +1032,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       // Handle different timer update formats from server
       let whiteTime: number
       let blackTime: number
+
       if (data.timers && typeof data.timers === "object") {
         whiteTime = safeTimerValue(data.timers.white)
         blackTime = safeTimerValue(data.timers.black)
@@ -1049,6 +1099,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   // Set up socket event listeners
   useEffect(() => {
     if (!socket) return
+
     socket.on("game:move", handleGameMove)
     socket.on("game:possibleMoves", handlePossibleMoves)
     socket.on("game:gameState", handleGameStateUpdate)
@@ -1109,6 +1160,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         move: { from: move.from, to: move.to, promotion: move.promotion },
         timestamp: Date.now(),
       })
+
       console.log("[DEBUG] Move emitted:", { from: move.from, to: move.to, promotion: move.promotion })
     },
     [socket, isMyTurn, frozenPieces, playerColor],
@@ -1151,6 +1203,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           Alert.alert("Frozen Piece", "This piece is frozen due to decay and cannot be moved!")
           return
         }
+
         setSelectedSquare(square)
         requestPossibleMoves(square)
       } else {
@@ -1198,12 +1251,15 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     const capturedPieces = gameState.board.capturedPieces || { white: [], black: [] }
     let whiteAdvantage = 0
     let blackAdvantage = 0
+
     capturedPieces.white.forEach((piece) => {
       whiteAdvantage += PIECE_VALUES[piece.toLowerCase() as keyof typeof PIECE_VALUES] || 0
     })
+
     capturedPieces.black.forEach((piece) => {
       blackAdvantage += PIECE_VALUES[piece.toUpperCase() as keyof typeof PIECE_VALUES] || 0
     })
+
     return { white: whiteAdvantage, black: blackAdvantage }
   }, [gameState.board.capturedPieces])
 
@@ -1224,7 +1280,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         <View style={styles.capturedPieces}>
           {Object.entries(pieceCounts).map(([piece, count]) => (
             <View key={piece} style={styles.capturedPieceGroup}>
-              <Text style={styles.capturedPiece}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>
+              {getPieceComponent(piece, isSmallScreen ? 14 : 16)}
               {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
             </View>
           ))}
@@ -1253,6 +1309,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       ) {
         lastMoveObj = gameState.lastMove
       }
+
       let isLastMove = false
       if (lastMoveObj && lastMoveObj.from && lastMoveObj.to) {
         isLastMove = lastMoveObj.from === square || lastMoveObj.to === square
@@ -1271,21 +1328,22 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       // Determine border color and width
       let borderColor = "transparent"
       let borderWidth = 0
+
       if (isFrozen) {
-        borderColor = "#ef4444" // Red for frozen pieces
-        borderWidth = 3
+        borderColor = "#dc2626" // Red for frozen pieces
+        borderWidth = 2
       } else if (isPossibleMove) {
-        borderColor = "#4ade80" // Green for possible moves
-        borderWidth = 3
+        borderColor = "#16a34a" // Green for possible moves
+        borderWidth = 2
       } else if (isSelected) {
-        borderColor = "#60a5fa" // Blue for selected
-        borderWidth = 3
+        borderColor = "#2563eb" // Blue for selected
+        borderWidth = 2
       } else if (isLastMove) {
-        borderColor = "#fbbf24" // Yellow for last move
-        borderWidth = 2
+        borderColor = "#f59e0b" // Yellow for last move
+        borderWidth = 1
       } else if (hasActiveDecayTimer) {
-        borderColor = "#f97316" // Orange for decay timer
-        borderWidth = 2
+        borderColor = "#ea580c" // Orange for decay timer
+        borderWidth = 1
       }
 
       return (
@@ -1298,15 +1356,18 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
                 {
                   width: squareSize,
                   left: 0,
-                  top: -32, // Position above the square
+                  top: isSmallScreen ? -20 : -24, // Position above the square
                 },
               ]}
             >
               <View style={styles.decayTimerBox}>
-                <Text style={styles.decayTimerBoxText}>{formatDecayTimeMinutes(decayTimeLeft)}</Text>
+                <Text style={[styles.decayTimerBoxText, { fontSize: decayTimerFontSize }]}>
+                  {formatDecayTimeMinutes(decayTimeLeft)}
+                </Text>
               </View>
             </View>
           )}
+
           <TouchableOpacity
             style={[
               styles.square,
@@ -1322,38 +1383,77 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           >
             {/* Coordinate labels */}
             {file === "a" && (
-              <Text style={[styles.coordinateLabel, styles.rankLabel, { color: isLight ? "#769656" : "#F0D9B5" }]}>
+              <Text
+                style={[
+                  styles.coordinateLabel,
+                  styles.rankLabel,
+                  {
+                    color: isLight ? "#769656" : "#F0D9B5",
+                    fontSize: isSmallScreen ? 8 : 10,
+                  },
+                ]}
+              >
                 {rank}
               </Text>
             )}
             {rank === "1" && (
-              <Text style={[styles.coordinateLabel, styles.fileLabel, { color: isLight ? "#769656" : "#F0D9B5" }]}>
-                {file}
-              </Text>
-            )}
-            {/* Piece */}
-            {piece && (
               <Text
                 style={[
-                  styles.piece,
+                  styles.coordinateLabel,
+                  styles.fileLabel,
                   {
-                    fontSize: Math.min(squareSize * 0.7, isTablet ? 40 : isSmallScreen ? 24 : 32),
-                    opacity: isFrozen ? 0.6 : 1,
+                    color: isLight ? "#769656" : "#F0D9B5",
+                    fontSize: isSmallScreen ? 8 : 10,
                   },
                 ]}
               >
-                {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
+                {file}
               </Text>
             )}
-            {/* Frozen indicator */}
-            {isFrozen && (
-              <View style={styles.frozenIndicator}>
-                <Text style={styles.frozenText}>❄️</Text>
+
+            {/* Piece */}
+            {piece && (
+              <View
+                style={{
+                  opacity: isFrozen ? 0.6 : 1,
+                }}
+              >
+                {getPieceComponent(piece, pieceFontSize)}
               </View>
             )}
+
+            {/* Frozen indicator */}
+            {isFrozen && (
+              <View style={[styles.frozenIndicator, { width: squareSize * 0.25, height: squareSize * 0.25 }]}>
+                <Text style={[styles.frozenText, { fontSize: squareSize * 0.15 }]}>❄️</Text>
+              </View>
+            )}
+
             {/* Move indicators */}
-            {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
-            {isPossibleMove && piece && <View style={styles.captureIndicator} />}
+            {isPossibleMove && !piece && (
+              <View
+                style={[
+                  styles.possibleMoveDot,
+                  {
+                    width: squareSize * 0.25,
+                    height: squareSize * 0.25,
+                    borderRadius: squareSize * 0.125,
+                  },
+                ]}
+              />
+            )}
+            {isPossibleMove && piece && (
+              <View
+                style={[
+                  styles.captureIndicator,
+                  {
+                    width: squareSize * 0.3,
+                    height: squareSize * 0.3,
+                    borderRadius: squareSize * 0.15,
+                  },
+                ]}
+              />
+            )}
           </TouchableOpacity>
         </View>
       )
@@ -1367,9 +1467,6 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       getPieceColor,
       decayState,
       frozenPieces,
-      squareSize,
-      isTablet,
-      isSmallScreen,
       handleSquarePress,
     ],
   )
@@ -1377,6 +1474,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   // Render game info (check, checkmate, stalemate, etc.)
   const renderGameInfo = useCallback(() => {
     const gs = gameState.gameState || {}
+
     // Check if game has ended
     if (gameState.status === "ended" || gs.gameEnded) {
       return (
@@ -1389,20 +1487,15 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     // Show whose turn it is
     const activePlayerName = gameState.players[gameState.board.activeColor]?.username || gameState.board.activeColor
     const isMyTurnActive = gameState.board.activeColor === playerColor
-    return (
-      <View style={styles.gameStatusContainer}>
-        <Text style={[styles.turnIndicator, isMyTurnActive && styles.myTurnIndicator]}>
-          {isMyTurnActive ? "🎯 Your Turn" : `⏳ ${activePlayerName}'s Turn`}
-        </Text>
-        <Text style={styles.variantName}>⚡ Decay Queen Chess</Text>
-      </View>
-    )
+
+    return
   }, [gameState.status, gameState.gameState, gameState.players, gameState.board.activeColor, playerColor])
 
   // FIXED: Render board with proper structure
   const renderBoard = useCallback(() => {
     const files = boardFlipped ? [...FILES].reverse() : FILES
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
+
     return (
       <View style={styles.boardContainer}>
         <View style={styles.board}>
@@ -1443,34 +1536,30 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           <View style={styles.playerHeader}>
             <View style={styles.playerDetails}>
               <View style={styles.playerNameRow}>
-                <Text
-                  style={[
-                    styles.playerColorIndicator,
-                    {
-                      color: color === "white" ? "#fff" : "#000",
-                      backgroundColor: color === "white" ? "#000" : "#fff",
-                    },
-                  ]}
-                >
-                  {color === "white" ? "♔" : "♚"}
-                </Text>
-                <Text style={[styles.playerName, isActive && styles.activePlayerName]}>{player.username}</Text>
+                <View style={styles.playerAvatar}>
+                  <Text style={styles.playerAvatarText}>{player.username.charAt(0).toUpperCase()}</Text>
+                </View>
+                <View style={styles.playerNameContainer}>
+                  <Text style={[styles.playerName, isActive && styles.activePlayerName]} numberOfLines={1}>
+                    {player.username}
+                  </Text>
+                  <Text style={styles.playerRating}>({player.rating > 0 ? player.rating : "Unrated"})</Text>
+                </View>
                 {isMe && <Text style={styles.youIndicator}>(You)</Text>}
               </View>
-              <Text style={styles.playerRating}>{player.rating > 0 ? `⭐ ${player.rating}` : "Unrated"}</Text>
-              {advantage > 0 && <Text style={styles.materialAdvantage}>+{advantage}</Text>}
               {/* Decay status */}
-              <View style={styles.decayStatus}>
-                {activeDecayTimers > 0 && <Text style={styles.decayStatusText}>⏱️ {activeDecayTimers} decaying</Text>}
-                {frozenPiecesCount > 0 && <Text style={styles.frozenStatusText}>❄️ {frozenPiecesCount} frozen</Text>}
-              </View>
+              {(activeDecayTimers > 0 || frozenPiecesCount > 0) && (
+                <View style={styles.decayStatus}>
+                  {activeDecayTimers > 0 && <Text style={styles.decayStatusText}>⏱️ {activeDecayTimers} decaying</Text>}
+                  {frozenPiecesCount > 0 && <Text style={styles.frozenStatusText}>❄️ {frozenPiecesCount} frozen</Text>}
+                </View>
+              )}
             </View>
             <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
-              <Text style={[styles.timerText, isActive && styles.activeTimerText]}>⏱️ {formatTime(timer)}</Text>
+              <Text style={[styles.timerText, isActive && styles.activeTimerText]}>{formatTime(timer)}</Text>
             </View>
           </View>
           {renderCapturedPieces(color)}
-          {isMe && isActive && <Text style={styles.yourTurnIndicator}>🎯 Your move!</Text>}
         </View>
       )
     },
@@ -1480,7 +1569,6 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       gameState.status,
       playerColor,
       localTimers,
-      safeTimerValue,
       calculateMaterialAdvantage,
       decayState,
       frozenPieces,
@@ -1491,6 +1579,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
   const renderMoveHistory = useCallback(() => {
     if (!showMoveHistory) return null
+
     const moves = moveHistory
     const movePairs = []
     for (let i = 0; i < moves.length; i += 2) {
@@ -1500,6 +1589,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
         black: moves[i + 1] || "",
       })
     }
+
     return (
       <Modal visible={showMoveHistory} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -1529,23 +1619,22 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     setBoardFlipped(!boardFlipped)
   }, [boardFlipped])
 
-  // Determine player positions based on color and board orientation
-  const topPlayerColor = boardFlipped ? playerColor : playerColor === "white" ? "black" : "white"
-  const bottomPlayerColor = boardFlipped ? (playerColor === "white" ? "black" : "white") : playerColor
+  // FIXED: Consistent player positioning - each player always sees themselves at bottom
+  const opponentColor = playerColor === "white" ? "black" : "white"
 
   return (
     <View style={styles.container}>
-      {/* Top Player */}
-      {renderPlayerInfo(topPlayerColor)}
+      {/* Opponent Player (always at top) */}
+      {renderPlayerInfo(opponentColor)}
 
       {/* Game Status */}
       {renderGameInfo()}
 
-      {/* Chess Board */}
+      {/* Chess Board - Centered */}
       {renderBoard()}
 
-      {/* Bottom Player */}
-      {renderPlayerInfo(bottomPlayerColor)}
+      {/* Current Player (always at bottom) */}
+      {renderPlayerInfo(playerColor)}
 
       {/* Bottom Control Bar */}
       <View style={styles.bottomBar}>
@@ -1597,13 +1686,10 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
                     style={styles.promotionOption}
                     onPress={() => handlePromotionSelect(option)}
                   >
-                    <Text style={styles.promotionPiece}>
-                      {
-                        PIECE_SYMBOLS[
-                          (playerColor === "white" ? option.toUpperCase() : option) as keyof typeof PIECE_SYMBOLS
-                        ]
-                      }
-                    </Text>
+                    {getPieceComponent(
+                      playerColor === "white" ? option.toUpperCase() : option,
+                      isSmallScreen ? 28 : 32,
+                    )}
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1649,115 +1735,154 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   )
 }
 
-// FIXED: Proper styles for chess board
+// Updated styles with improved centering and responsive design
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#2c2c2c", // Chess.com dark background
-    padding: containerPadding,
-    paddingTop: 40,
+    backgroundColor: "#312e2b", // Chess.com dark background
+    paddingTop: isSmallScreen ? 30 : isTablet ? 60 : 50,
+    paddingBottom: bottomBarHeight,
+    paddingHorizontal: horizontalPadding,
   },
   boardContainer: {
     alignItems: "center",
-    marginBottom: 16,
+    justifyContent: "center",
+    marginVertical: verticalSpacing,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    // Ensure the board is perfectly centered
+    alignSelf: "center",
   },
   board: {
-    flexDirection: "column", // FIXED: Column for ranks
+    flexDirection: "column",
+    borderRadius: 4,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "#4a4a4a",
+    width: boardSize,
+    height: boardSize,
   },
   row: {
-    flexDirection: "row", // FIXED: Row for files
+    flexDirection: "row",
+    flex: 1,
   },
   square: {
-    width: squareSize, // Use global squareSize
-    height: squareSize, // Use global squareSize
     justifyContent: "center",
     alignItems: "center",
-    position: "relative", // FIXED: Added position relative for absolute children
-  },
-  piece: {
-    fontSize: 24,
-    textAlign: "center",
-    color: "#fff", // Default piece color
+    position: "relative",
+    flex: 1,
   },
   playerInfoContainer: {
-    backgroundColor: "#333",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
+   
+    borderRadius: 2,
+    paddingHorizontal: isSmallScreen ? 12 : isTablet ? 20 : 16,
+    paddingVertical: isSmallScreen ? 10 : isTablet ? 16 : 12,
+    marginVertical: componentSpacing,
+
+
+    minHeight: playerInfoHeight,
+    // Improved shadow for better visual separation
+ 
+
+   
+  
   },
   activePlayerContainer: {
-    backgroundColor: "#444",
+    backgroundColor: "#2d5a2d",
+    borderColor: "#4ade80",
+    borderWidth: 2,
+    shadowColor: "#4ade80",
+    shadowOpacity: 0.3,
   },
   playerHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
   },
   playerDetails: {
     flex: 1,
+    marginRight: isSmallScreen ? 8 : 12,
   },
   playerNameRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginBottom: isSmallScreen ? 4 : 6,
   },
-  playerColorIndicator: {
-    fontSize: 16,
-    marginRight: 4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    textAlign: "center",
-    lineHeight: 20,
+  playerAvatar: {
+    width: isSmallScreen ? 32 : isTablet ? 48 : 40,
+    height: isSmallScreen ? 32 : isTablet ? 48 : 40,
+    borderRadius: isSmallScreen ? 16 : isTablet ? 24 : 20,
+    backgroundColor: "#4a4a4a",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: isSmallScreen ? 8 : isTablet ? 16 : 12,
+  },
+  playerAvatarText: {
+    color: "#fff",
+    fontSize: isSmallScreen ? 14 : isTablet ? 20 : 16,
+    fontWeight: "bold",
+  },
+  playerNameContainer: {
+    flex: 1,
+    marginRight: 8,
   },
   playerName: {
     color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
+    fontWeight: "600",
   },
   activePlayerName: {
     color: "#4ade80",
   },
-  youIndicator: {
-    color: "#a1a1aa",
-    fontSize: 14,
-    marginLeft: 4,
-  },
   playerRating: {
     color: "#a1a1aa",
-    fontSize: 14,
+    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
+    marginTop: 2,
   },
-  materialAdvantage: {
-    color: "#4ade80",
-    fontSize: 14,
-    fontWeight: "bold",
+  youIndicator: {
+    color: "#60a5fa",
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
+    fontWeight: "500",
+    backgroundColor: "#1e3a8a",
+    paddingHorizontal: isSmallScreen ? 6 : 8,
+    paddingVertical: 2,
+    borderRadius: 10,
   },
   decayStatus: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 4,
+    flexWrap: "wrap",
   },
   decayStatusText: {
     color: "#f97316",
-    fontSize: 12,
-    marginRight: 8,
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
+    marginRight: 12,
+    marginTop: 2,
   },
   frozenStatusText: {
     color: "#ef4444",
-    fontSize: 12,
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
+    marginTop: 2,
   },
   timerContainer: {
-    backgroundColor: "#555",
-    padding: 8,
-    borderRadius: 4,
+    backgroundColor: "#1a1a1a",
+    paddingHorizontal: isSmallScreen ? 12 : isTablet ? 20 : 16,
+    paddingVertical: isSmallScreen ? 8 : isTablet ? 12 : 10,
+    borderRadius: 20,
+    minWidth: isSmallScreen ? 70 : isTablet ? 100 : 80,
+    alignItems: "center",
   },
   activeTimerContainer: {
-    backgroundColor: "#4ade80",
+    backgroundColor: "#fff",
   },
   timerText: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: isSmallScreen ? 16 : isTablet ? 22 : 18,
     fontWeight: "bold",
+    fontFamily: "monospace",
   },
   activeTimerText: {
     color: "#000",
@@ -1765,90 +1890,82 @@ const styles = StyleSheet.create({
   capturedPieces: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 8,
+    marginTop: isSmallScreen ? 8 : isTablet ? 16 : 12,
+    paddingTop: isSmallScreen ? 6 : isTablet ? 12 : 8,
+    borderTopWidth: 1,
+    borderTopColor: "#3a3a3a",
   },
   capturedPieceGroup: {
     flexDirection: "row",
     alignItems: "center",
     marginRight: 8,
-  },
-  capturedPiece: {
-    fontSize: 16,
-    color: "#a1a1aa",
+    marginBottom: 4,
   },
   capturedCount: {
     color: "#a1a1aa",
-    fontSize: 12,
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
     marginLeft: 2,
-  },
-  yourTurnIndicator: {
-    color: "#4ade80",
-    fontSize: 14,
     fontWeight: "bold",
-    textAlign: "center",
-    marginTop: 8,
   },
   gameStatusContainer: {
     alignItems: "center",
-    marginBottom: 16,
+    marginVertical: componentSpacing,
+    paddingHorizontal: 16,
+    minHeight: gameStatusHeight,
+    justifyContent: "center",
   },
   gameOverText: {
     color: "#ef4444",
-    fontSize: 20,
+    fontSize: isSmallScreen ? 16 : isTablet ? 22 : 18,
     fontWeight: "bold",
   },
   turnIndicator: {
     color: "#a1a1aa",
-    fontSize: 16,
+    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
     marginBottom: 4,
+    textAlign: "center",
   },
   myTurnIndicator: {
     color: "#4ade80",
+    fontWeight: "600",
   },
   variantName: {
     color: "#60a5fa",
-    fontSize: 14,
+    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
+    fontStyle: "italic",
+    textAlign: "center",
   },
-  // New bottom bar styles
   bottomBar: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    width: "100%",
-    backgroundColor: "#1a1a1a", // Dark background for the bar
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#333", // Subtle separator
-    position: "absolute", // Position at the bottom
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "#1a1a1a",
+    paddingVertical: isSmallScreen ? 10 : isTablet ? 16 : 12,
+    paddingHorizontal: horizontalPadding,
+    borderTopWidth: 1,
+    borderTopColor: "#3a3a3a",
+    height: bottomBarHeight,
   },
   bottomBarButton: {
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 8,
+    paddingHorizontal: isSmallScreen ? 8 : isTablet ? 16 : 12,
+    borderRadius: 8,
+    flex: 1,
   },
   bottomBarIcon: {
-    fontSize: 24,
-    color: "#fff", // White icons
+    fontSize: isSmallScreen ? 18 : isTablet ? 24 : 20,
+    color: "#fff",
     marginBottom: 4,
   },
   bottomBarLabel: {
-    fontSize: 12,
-    color: "#fff", // White labels
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
+    color: "#a1a1aa",
     fontWeight: "500",
-  },
-  // End new bottom bar styles
-  historyButton: {
-    backgroundColor: "#60a5fa",
-    padding: 8,
-    borderRadius: 4,
-    marginLeft: 8,
-  },
-  historyButtonText: {
-    color: "#fff",
-    fontSize: 14,
   },
   modalOverlay: {
     flex: 1,
@@ -1857,11 +1974,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   moveHistoryModal: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 16,
-    width: "80%",
-    maxHeight: "60%",
+    backgroundColor: "#262421",
+    borderRadius: 12,
+    padding: 20,
+    width: "85%",
+    maxHeight: "70%",
+    borderWidth: 1,
+    borderColor: "#3a3a3a",
   },
   moveHistoryHeader: {
     flexDirection: "row",
@@ -1871,17 +1990,18 @@ const styles = StyleSheet.create({
   },
   moveHistoryTitle: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: isSmallScreen ? 16 : isTablet ? 20 : 18,
     fontWeight: "bold",
   },
   closeButton: {
     backgroundColor: "#ef4444",
     padding: 8,
-    borderRadius: 4,
+    borderRadius: 6,
   },
   closeButtonText: {
     color: "#fff",
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: "bold",
   },
   moveHistoryScroll: {
     maxHeight: 300,
@@ -1889,106 +2009,109 @@ const styles = StyleSheet.create({
   moveRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
+    paddingVertical: 4,
   },
   moveNumber: {
     color: "#a1a1aa",
-    fontSize: 14,
+    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
     width: 30,
+    fontFamily: "monospace",
   },
   moveText: {
     color: "#fff",
-    fontSize: 14,
+    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
     marginRight: 16,
+    fontFamily: "monospace",
   },
   promotionModal: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 16,
+    backgroundColor: "#262421",
+    borderRadius: 12,
+    padding: 20,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#3a3a3a",
   },
   promotionTitle: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: isSmallScreen ? 16 : isTablet ? 20 : 18,
     fontWeight: "bold",
-    marginBottom: 16,
+    marginBottom: 20,
   },
   promotionOptions: {
     flexDirection: "row",
+    gap: 12,
   },
   promotionOption: {
-    backgroundColor: "#60a5fa",
-    padding: 12,
-    borderRadius: 4,
-    marginHorizontal: 8,
-  },
-  promotionPiece: {
-    fontSize: 24,
-    color: "#fff",
+    backgroundColor: "#4a4a4a",
+    padding: isSmallScreen ? 12 : isTablet ? 20 : 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#60a5fa",
   },
   gameEndModal: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 16,
+    backgroundColor: "#262421",
+    borderRadius: 12,
+    padding: 24,
     alignItems: "center",
-    width: "80%",
+    width: "85%",
+    borderWidth: 2,
+    borderColor: "#3a3a3a",
   },
   victoryModal: {
-    borderColor: "#90EE90", // Green for victory
-    borderWidth: 2,
+    borderColor: "#4ade80",
   },
   defeatModal: {
-    borderColor: "#FF6B6B", // Red for defeat
-    borderWidth: 2,
+    borderColor: "#ef4444",
   },
   gameEndTitle: {
-    fontSize: 24,
+    fontSize: isSmallScreen ? 20 : isTablet ? 28 : 24,
     fontWeight: "bold",
     textAlign: "center",
     marginBottom: 16,
     color: "#fff",
   },
   victoryTitle: {
-    color: "#90EE90",
+    color: "#4ade80",
   },
   defeatTitle: {
-    color: "#FF6B6B",
+    color: "#ef4444",
   },
   gameEndMessage: {
     color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
     textAlign: "center",
     marginBottom: 16,
+    lineHeight: 24,
   },
   gameEndReason: {
     color: "#a1a1aa",
-    fontSize: 14,
+    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
     marginBottom: 8,
   },
   gameEndMove: {
     color: "#a1a1aa",
-    fontSize: 14,
+    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
     marginBottom: 8,
   },
   gameEndWinner: {
     color: "#4ade80",
-    fontSize: 16,
+    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
     fontWeight: "bold",
     marginBottom: 16,
   },
   menuButton: {
     backgroundColor: "#60a5fa",
-    padding: 12,
-    borderRadius: 4,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
   },
   menuButtonText: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
+    fontWeight: "600",
   },
   coordinateLabel: {
     position: "absolute",
-    fontSize: 10,
     fontWeight: "bold",
   },
   rankLabel: {
@@ -2006,15 +2129,20 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   decayTimerBox: {
-    backgroundColor: "#f97316", // Orange
+    backgroundColor: "#f97316",
     borderRadius: 4,
-    paddingHorizontal: 6,
+    paddingHorizontal: isSmallScreen ? 4 : 6,
     paddingVertical: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   decayTimerBoxText: {
     color: "#fff",
-    fontSize: 10,
     fontWeight: "bold",
+    fontFamily: "monospace",
   },
   frozenIndicator: {
     position: "absolute",
@@ -2022,30 +2150,22 @@ const styles = StyleSheet.create({
     right: 2,
     backgroundColor: "#ef4444",
     borderRadius: 8,
-    width: 16,
-    height: 16,
     justifyContent: "center",
     alignItems: "center",
   },
   frozenText: {
-    fontSize: 8,
+    // fontSize is set dynamically in renderSquare
   },
   possibleMoveDot: {
     position: "absolute",
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#4ade80",
-    bottom: 4,
-    right: 4,
+    backgroundColor: "#16a34a",
+    opacity: 0.8,
   },
   captureIndicator: {
     position: "absolute",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#ef4444",
+    backgroundColor: "#dc2626",
     top: 2,
     right: 2,
+    opacity: 0.9,
   },
 })
