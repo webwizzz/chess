@@ -1,40 +1,33 @@
 "use client"
+
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../utils/socketManager"
-
-// Define types for pocket pieces
-interface PocketPieceStandard {
-  type: string // e.g., "p", "n", "b"
-}
-
-interface PocketPieceWithTimer {
-  type: string
-  id: string
-  capturedAt: number
-}
-
-type PocketPiece = PocketPieceStandard | PocketPieceWithTimer
+import type { CrazyHouseChessGameProps, Move, PocketPieceStandardType, PocketPieceWithTimerType } from "./types"; // Declare CrazyHouseChessGameProps and Move
 
 // Types
-interface Player {
-  userId: string
-  username: string
-  rating: number
-  avatar: string | null
-  title: string | null
+type PocketPieceType = PocketPieceStandardType | PocketPieceWithTimerType
+
+interface availableDropPieceType {
+  canDrop: boolean
+  capturedAt: number
+  id: string
+  type: string // e.g., "p", "n", "b"
+  timeRemaining: number
+  timerPaused?: boolean // Added for local calculation
+  remainingTime?: number // Added for local calculation
 }
 
-interface GameState {
+interface GameStateType {
   sessionId: string
   variantName: string
   subvariantName?: string // "withTimer" or undefined/other for standard
   description: string
   players: {
-    white: Player
-    black: Player
+    white: any
+    black: any
   }
   board: {
     fen: string
@@ -44,29 +37,34 @@ interface GameState {
     enPassantSquare: string
     halfmoveClock: number
     fullmoveNumber: number
-    whiteTime?: number
-    blackTime?: number
-    turnStartTimestamp?: number
-    lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
+    whiteTime: number
+    blackTime: number
+    turnStartTimestamp: number
+    lastMoveTimestamp: number
+    moveHistory: { from: string; to: string; [key: string]: any }[]
     pocketedPieces: {
-      white: PocketPiece[]
-      black: PocketPiece[]
+      white: PocketPieceType[]
+      black: PocketPieceType[]
     }
-    dropTimers?: {
-      white: { [pieceId: string]: number }
-      black: { [pieceId: string]: number }
+    availableDropPieces?: {
+      white: availableDropPieceType[]
+      black: availableDropPieceType[]
     }
-    frozenPieces?: {
-      white: PocketPieceWithTimer[]
-      black: PocketPieceWithTimer[]
+    // Backend sends this as a plain object, frontend converts to Map for internal use
+    dropTimers: {
+      white: Record<string, number> | Map<string, number>
+      black: Record<string, number> | Map<string, number>
     }
-    gameStarted?: boolean
-    firstMoveTimestamp?: number
-    gameEnded?: boolean
-    endReason?: string | null
-    winner?: string | null
-    endTimestamp?: number | null
+    frozenPieces: {
+      white: PocketPieceWithTimerType[] // These are pieces that have expired and been removed from the pocket
+      black: PocketPieceWithTimerType[]
+    }
+    gameStarted: boolean
+    firstMoveTimestamp: number | null
+    gameEnded: boolean
+    endReason: string | null
+    winner: string | null
+    endTimestamp: number | null
   }
   timeControl: {
     type: string
@@ -84,12 +82,13 @@ interface GameState {
   }
   status: string
   result: string
-  resultReason?: string | null
-  winner?: string | null
+  resultReason: string | null
+  winner: string | null
   moves: any[]
   moveCount: number
   lastMove: any
   gameState: {
+    // This is the nested gameState object from the backend's result
     check?: boolean
     checkmate?: boolean
     stalemate?: boolean
@@ -100,32 +99,32 @@ interface GameState {
     result?: string
     winner?: string | null
     endReason?: string | null
+    pocketedPieces?: {
+      white: PocketPieceType[]
+      black: PocketPieceType[]
+    }
+    dropTimers?: {
+      // This is where the correct dropTimers are
+      white: Record<string, number>
+      black: Record<string, number>
+    }
+    frozenPieces?: {
+      // This is where the derived frozenPieces (in pocket but not droppable) are
+      white: PocketPieceWithTimerType[]
+      black: PocketPieceWithTimerType[]
+    }
   }
   userColor: {
     [key: string]: "white" | "black"
   }
-  positionHistory?: string[]
-  createdAt?: number
-  lastActivity?: number
-  startedAt?: number
-  endedAt?: number | null
+  positionHistory: string[]
+  createdAt: number
+  lastActivity: number
+  startedAt: number
+  endedAt: number | null
   rules?: any
-  metadata?: any
+  metadata: any
   timers?: any
-}
-
-interface Move {
-  from?: string
-  to: string
-  piece?: string
-  drop?: boolean
-  promotion?: string
-}
-
-interface CrazyHouseChessGameProps {
-  initialGameState: GameState
-  userId: string
-  onNavigateToMenu?: () => void
 }
 
 const PIECE_SYMBOLS = {
@@ -141,7 +140,7 @@ const PIECE_SYMBOLS = {
   Q: "♕",
   K: "♔",
   P: "♙",
-}
+} as const // Use 'as const' for better type inference
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"]
@@ -152,11 +151,11 @@ const squareSize = boardSize / 8
 
 export default function CrazyHouseChessGame({ initialGameState, userId, onNavigateToMenu }: CrazyHouseChessGameProps) {
   const router = useRouter()
-  const [gameState, setGameState] = useState<GameState>(initialGameState)
+  const [gameState, setGameState] = useState<GameStateType>(initialGameState)
   const [socket, setSocket] = useState<Socket | null>(null)
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
   const [possibleMoves, setPossibleMoves] = useState<string[]>([])
-  const [selectedPocketPiece, setSelectedPocketPiece] = useState<string | PocketPieceWithTimer | null>(null)
+  const [selectedPocketPiece, setSelectedPocketPiece] = useState<string | PocketPieceWithTimerType | null>(null)
   const [selectedPocket, setSelectedPocket] = useState<"white" | "black" | null>(null)
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [playerColor, setPlayerColor] = useState<"white" | "black">("white")
@@ -175,16 +174,24 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   const [gameEndMessage, setGameEndMessage] = useState("")
   const [isWinner, setIsWinner] = useState<boolean | null>(null)
   const [localTimers, setLocalTimers] = useState<{ white: number; black: number }>({
-    white: initialGameState.timeControl.timers.white,
-    black: initialGameState.timeControl.timers.black,
+    white: initialGameState.board.whiteTime, // Use board.whiteTime
+    black: initialGameState.board.blackTime, // Use board.blackTime
   })
   const [localDropTimers, setLocalDropTimers] = useState<{ white: number | null; black: number | null }>({
     white: null,
     black: null,
   })
-
   const timerRef = useRef<any>(null)
   const navigationTimeoutRef = useRef<any>(null)
+
+  // Helper to convert plain object dropTimers to Map
+  const getDropTimersMap = (
+    dropTimers: GameStateType["board"]["dropTimers"] | GameStateType["gameState"]["dropTimers"],
+    color: "white" | "black",
+  ) => {
+    const timers = dropTimers?.[color]
+    return timers instanceof Map ? timers : new Map(Object.entries(timers || {}))
+  }
 
   useEffect(() => {
     const gameSocket = getSocketInstance()
@@ -199,16 +206,28 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     setPlayerColor(userColor === "white" || userColor === "black" ? userColor : "white")
     setBoardFlipped(userColor === "black")
     setIsMyTurn(initialGameState.board.activeColor === userColor)
+    setMoveHistory(initialGameState.moves || []) // Initialize move history
 
     // Initialize local drop timers if it's a withTimer variant
     if (initialGameState.subvariantName === "withTimer") {
       const activeColor = initialGameState.board.activeColor
-      const pocket = initialGameState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]
-      const dropTimersMap = new Map(Object.entries(initialGameState.board.dropTimers?.[activeColor] || {}))
+      const pocket = initialGameState.board.pocketedPieces[activeColor] as PocketPieceWithTimerType[]
+      // Prioritize dropTimers from initialGameState.gameState if available, otherwise from board
+      const sourceDropTimers = initialGameState.gameState?.dropTimers || initialGameState.board.dropTimers
+      const dropTimersMap = getDropTimersMap(sourceDropTimers, activeColor)
 
       if (pocket.length > 0) {
         const firstPiece = pocket[0]
-        const expirationTimestamp = dropTimersMap.get(firstPiece.id)
+        let expirationTimestamp = dropTimersMap.get(firstPiece.id)
+        // If timer is not in the active map, check if it's paused on the piece itself
+        if (
+          !expirationTimestamp &&
+          (firstPiece as availableDropPieceType).timerPaused &&
+          (firstPiece as availableDropPieceType).remainingTime !== undefined
+        ) {
+          expirationTimestamp = Date.now() + (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+        }
+
         if (expirationTimestamp) {
           const remaining = expirationTimestamp - Date.now()
           setLocalDropTimers((prev) => ({
@@ -250,63 +269,66 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
 
-    if (gameState.status !== "active" || gameState.gameState?.gameEnded) {
-      setLocalDropTimers({ white: null, black: null }) // Clear drop timers if game not active/ended
+    if (gameState.status !== "active" || gameState.board.gameEnded) {
+      setLocalDropTimers({ white: null, black: null })
       return
     }
 
+    // Timer update interval
     timerRef.current = setInterval(() => {
       setLocalTimers((prevMainTimers) => {
         const activeColor = gameState.board.activeColor
         const now = Date.now()
         let newWhite = prevMainTimers.white
         let newBlack = prevMainTimers.black
-
-        // Update main game clock
+        // Updates both main game clock and piece drop timers
         if (activeColor === "white") {
           newWhite = Math.max(0, newWhite - 100)
         } else {
           newBlack = Math.max(0, newBlack - 100)
         }
-
-        // Update drop timers if it's a "withTimer" variant
+        // Drop timer updates
         if (gameState.subvariantName === "withTimer") {
           setLocalDropTimers((prevDropTimers) => {
-            const newDropTimers = { ...prevDropTimers }
-            const currentActivePlayerPocket =
-              (gameState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]) || []
-            const currentActivePlayerDropTimersMap = new Map(
-              Object.entries(gameState.board.dropTimers?.[activeColor] || {}),
-            )
-
-            if (currentActivePlayerPocket.length > 0) {
-              const firstPiece = currentActivePlayerPocket[0]
-              const expirationTimestamp = currentActivePlayerDropTimersMap.get(firstPiece.id)
-
-              if (expirationTimestamp) {
-                const remaining = expirationTimestamp - now
-                newDropTimers[activeColor] = Math.max(0, remaining)
-              } else {
-                newDropTimers[activeColor] = null // No active timer for the first piece
-              }
-            } else {
-              newDropTimers[activeColor] = null // No pieces in pocket
+            const newDropTimers = { 
+              white: prevDropTimers.white, 
+              black: prevDropTimers.black 
             }
+            
+            // Only update timer for active player
+            if (activeColor === "white" || activeColor === "black") {
+              const currentActivePlayerPocket =
+                (gameState.board.pocketedPieces[activeColor] as PocketPieceWithTimerType[]) || []
+              const currentActivePlayerDropTimersMap = getDropTimersMap(gameState.board.dropTimers, activeColor)
 
-            // Ensure the other player's drop timer is null as only one player has an active drop timer
-            const otherColor = activeColor === "white" ? "black" : "white"
-            newDropTimers[otherColor] = null
+              if (currentActivePlayerPocket.length > 0) {
+                const firstPiece = currentActivePlayerPocket[0]
+                let expirationTimestamp = currentActivePlayerDropTimersMap.get(firstPiece.id)
 
+                // If timer is not in the active map, check if it's paused on the piece itself
+                if (
+                  !expirationTimestamp &&
+                  (firstPiece as availableDropPieceType).timerPaused &&
+                  (firstPiece as availableDropPieceType).remainingTime !== undefined
+                ) {
+                  expirationTimestamp = now + (firstPiece as availableDropPieceType).remainingTime
+                }
+
+                if (expirationTimestamp) {
+                  const remaining = expirationTimestamp - now
+                  newDropTimers[activeColor] = Math.max(0, remaining)
+                }
+              }
+            }
             return newDropTimers
           })
         } else {
-          // If not withTimer, ensure drop timers are null
           setLocalDropTimers({ white: null, black: null })
         }
 
         return { white: newWhite, black: newBlack }
       })
-    }, 100)
+    }, 100) // Update every 100ms for smoother countdown
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
@@ -314,12 +336,12 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   }, [
     gameState.status,
     gameState.board.activeColor,
-    gameState.timeControl.timers.white,
-    gameState.timeControl.timers.black,
-    gameState.gameState?.gameEnded,
+    gameState.board.whiteTime, // Depend on board times for re-initialization
+    gameState.board.blackTime,
+    gameState.board.gameEnded,
     gameState.subvariantName,
     gameState.board.pocketedPieces,
-    gameState.board.dropTimers,
+    gameState.board.dropTimers, // This dependency is important for the interval to react to changes in dropTimers
   ])
 
   // Socket handlers
@@ -329,39 +351,56 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
       setGameState((prevState) => {
         const newState = {
           ...prevState,
-          ...data.gameState,
-          board: { ...prevState.board, ...data.gameState.board },
+          ...data.gameState, // Merges top-level properties
+          board: {
+            ...prevState.board,
+            ...data.gameState.board, // Merges board properties, including board.frozenPieces (expired ones)
+            dropTimers: data.gameState.gameState?.dropTimers || data.gameState.board.dropTimers,
+          },
+          gameState: {
+            // Ensure the nested gameState is updated with its specific properties
+            ...prevState.gameState,
+            ...data.gameState.gameState, // This will correctly update gameState.frozenPieces with the *derived* ones
+          },
+          // Ensure timeControl.timers are updated if they are the source of truth
+          // Otherwise, board.whiteTime/blackTime should be used directly
           timeControl: {
             ...prevState.timeControl,
             ...data.gameState.timeControl,
             timers: {
-              white: data.gameState.timeControl?.timers?.white ?? prevState.timeControl.timers.white,
-              black: data.gameState.timeControl?.timers?.black ?? prevState.timeControl.timers.black,
+              white: data.gameState.board?.whiteTime ?? prevState.timeControl.timers.white,
+              black: data.gameState.board?.blackTime ?? prevState.timeControl.timers.black,
             },
           },
           moves: data.gameState.moves || [],
           lastMove: data.gameState.lastMove,
           moveCount: data.gameState.moveCount,
         }
-
         // Re-hydrate dropTimers Maps if they come as plain objects (only for withTimer)
         if (newState.subvariantName === "withTimer" && newState.board.dropTimers) {
-          newState.board.dropTimers.white = new Map(Object.entries(newState.board.dropTimers.white || {}))
-          newState.board.dropTimers.black = new Map(Object.entries(newState.board.dropTimers.black || {}))
+          newState.board.dropTimers.white = getDropTimersMap(newState.board.dropTimers, "white")
+          newState.board.dropTimers.black = getDropTimersMap(newState.board.dropTimers, "black")
         }
 
         // Update local drop timers immediately based on new state
         if (newState.subvariantName === "withTimer") {
           const activeColor = newState.board.activeColor
-          const pocket = newState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]
-          const dropTimersMap = new Map(Object.entries(newState.board.dropTimers?.[activeColor] || {}))
+          const pocket = newState.board.pocketedPieces[activeColor] as PocketPieceWithTimerType[]
+          const dropTimersMap = getDropTimersMap(newState.board.dropTimers, activeColor)
           const now = Date.now()
-
           setLocalDropTimers((prev) => {
             const newDropTimers = { white: null, black: null } // Reset both
             if (pocket.length > 0) {
               const firstPiece = pocket[0]
-              const expirationTimestamp = dropTimersMap.get(firstPiece.id)
+              let expirationTimestamp = dropTimersMap.get(firstPiece.id)
+              // If timer is not in the active map, check if it's paused on the piece itself
+              if (
+                !expirationTimestamp &&
+                (firstPiece as availableDropPieceType).timerPaused &&
+                (firstPiece as availableDropPieceType).remainingTime !== undefined
+              ) {
+                expirationTimestamp = now + (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+              }
               if (expirationTimestamp) {
                 newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
               }
@@ -372,6 +411,11 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           setLocalDropTimers({ white: null, black: null })
         }
 
+        // Update local main timers based on the new board state
+        setLocalTimers({
+          white: newState.board.whiteTime,
+          black: newState.board.blackTime,
+        })
         return newState
       })
       setMoveHistory(data.gameState.moves || [])
@@ -401,34 +445,50 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         const newState = {
           ...prevState,
           ...data.gameState,
+          board: {
+            ...prevState.board,
+            ...data.gameState.board, // Merges board properties, including board.frozenPieces (expired ones)
+            dropTimers: data.gameState.gameState?.dropTimers || data.gameState.board.dropTimers,
+          },
+          gameState: {
+            // Ensure the nested gameState is updated with its specific properties
+            ...prevState.gameState,
+            ...data.gameState.gameState, // This will correctly update gameState.frozenPieces with the *derived* ones
+          },
           timeControl: {
             ...prevState.timeControl,
             ...data.gameState.timeControl,
             timers: {
-              white: data.gameState.timeControl?.timers?.white ?? prevState.timeControl.timers.white,
-              black: data.gameState.timeControl?.timers?.black ?? prevState.timeControl.timers.black,
+              white: data.gameState.board?.whiteTime ?? prevState.timeControl.timers.white,
+              black: data.gameState.board?.blackTime ?? prevState.timeControl.timers.black,
             },
           },
         }
-
         // Re-hydrate dropTimers Maps if they come as plain objects (only for withTimer)
         if (newState.subvariantName === "withTimer" && newState.board.dropTimers) {
-          newState.board.dropTimers.white = new Map(Object.entries(newState.board.dropTimers.white || {}))
-          newState.board.dropTimers.black = new Map(Object.entries(newState.board.dropTimers.black || {}))
+          newState.board.dropTimers.white = getDropTimersMap(newState.board.dropTimers, "white")
+          newState.board.dropTimers.black = getDropTimersMap(newState.board.dropTimers, "black")
         }
 
         // Update local drop timers immediately based on new state
         if (newState.subvariantName === "withTimer") {
           const activeColor = newState.board.activeColor
-          const pocket = newState.board.pocketedPieces[activeColor] as PocketPieceWithTimer[]
-          const dropTimersMap = new Map(Object.entries(newState.board.dropTimers?.[activeColor] || {}))
+          const pocket = newState.board.pocketedPieces[activeColor] as PocketPieceWithTimerType[]
+          const dropTimersMap = getDropTimersMap(newState.board.dropTimers, activeColor)
           const now = Date.now()
-
           setLocalDropTimers((prev) => {
             const newDropTimers = { white: null, black: null } // Reset both
             if (pocket.length > 0) {
               const firstPiece = pocket[0]
-              const expirationTimestamp = dropTimersMap.get(firstPiece.id)
+              let expirationTimestamp = dropTimersMap.get(firstPiece.id)
+              // If timer is not in the active map, check if it's paused on the piece itself
+              if (
+                !expirationTimestamp &&
+                (firstPiece as availableDropPieceType).timerPaused &&
+                (firstPiece as availableDropPieceType).remainingTime !== undefined
+              ) {
+                expirationTimestamp = now + (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+              }
               if (expirationTimestamp) {
                 newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
               }
@@ -439,6 +499,11 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           setLocalDropTimers({ white: null, black: null })
         }
 
+        // Update local main timers based on the new board state
+        setLocalTimers({
+          white: newState.board.whiteTime,
+          black: newState.board.blackTime,
+        })
         return newState
       })
       setIsMyTurn(data.gameState.board.activeColor === playerColor)
@@ -446,21 +511,24 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   }
 
   function handleTimerUpdate(data: any) {
-    const whiteTime = data.timers?.white ?? data.white ?? localTimers.white
-    const blackTime = data.timers?.black ?? data.black ?? localTimers.black
+    // This handler is for the main game timers only, drop timers are handled by game:move/gameState
+    const whiteTime = data.white ?? localTimers.white
+    const blackTime = data.black ?? localTimers.black
     setLocalTimers({ white: whiteTime, black: blackTime })
   }
 
   function handleGameEndEvent(data: any) {
-    const result = data.gameState?.gameState?.result || data.gameState?.result || data.result || "unknown"
+    const result = data.gameState?.gameState?.result || data.gameState?.result || data.winner || "unknown"
     const winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
     setIsWinner(winner === playerColor ? true : winner ? false : null)
     setGameEndMessage(result)
     setShowGameEndModal(true)
+
     setTimeout(() => {
       if (socket) socket.disconnect()
       setSocket(null)
     }, 1000)
+
     navigationTimeoutRef.current = setTimeout(() => {
       setShowGameEndModal(false)
       if (onNavigateToMenu) onNavigateToMenu()
@@ -470,10 +538,23 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
   function handleGameError(data: any) {
     Alert.alert("Error", data.message || data.error || "An error occurred")
+    // Keep turn active on error
+    setIsMyTurn(true)
+    setSelectedSquare(null)
+    setPossibleMoves([])
+    setSelectedPocketPiece(null)
+    setSelectedPocket(null)
   }
 
   function handleGameWarning(data: any) {
     Alert.alert("Warning", data?.message || "Warning: Invalid move or rule violation.")
+    // Continue game and allow player to make another move
+    const userColor = gameState.userColor[userId]
+    setIsMyTurn(gameState.board.activeColor === userColor) // Re-evaluate based on current activeColor
+    setSelectedSquare(null)
+    setPossibleMoves([])
+    setSelectedPocketPiece(null)
+    setSelectedPocket(null)
   }
 
   // Move logic
@@ -484,6 +565,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
   function makeMove(move: Move) {
     if (!socket || !isMyTurn) return
+
     setIsMyTurn(false)
     setSelectedSquare(null)
     setPossibleMoves([])
@@ -496,21 +578,14 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
       const pieceAtTarget = getPieceAt(square)
       if (!pieceAtTarget) {
         let pieceToDrop: string
+        let pieceId: string | undefined
+
         if (gameState.subvariantName === "withTimer") {
-          // For withTimer, selectedPocketPiece is PocketPieceWithTimer
-          const selectedPieceObj = selectedPocketPiece as PocketPieceWithTimer
-          const playerPocket = (gameState.board.pocketedPieces[playerColor] as PocketPieceWithTimer[]) || []
-          const playerDropTimers = new Map(Object.entries(gameState.board.dropTimers?.[playerColor] || {}))
+          // Only allow drop for availableDropPieces
+          const availableDropPieces = gameState.board.availableDropPieces?.[playerColor] || []
+          const selectedPieceObj = availableDropPieces.find((p) => p.id === (selectedPocketPiece as any).id)
 
-          // Check if the selected piece is the *first* in the pocket and has an active timer
-          const firstPieceInPocket = playerPocket.length > 0 ? playerPocket[0] : null
-          const isSelectedPieceActiveDroppable =
-            firstPieceInPocket &&
-            firstPieceInPocket.id === selectedPieceObj.id &&
-            playerDropTimers.has(selectedPieceObj.id) &&
-            playerDropTimers.get(selectedPieceObj.id)! > Date.now()
-
-          if (!isSelectedPieceActiveDroppable) {
+          if (!selectedPieceObj || !selectedPieceObj.canDrop) {
             Alert.alert("Invalid Drop", "This piece is not currently available for drop or its timer has expired.")
             setSelectedPocketPiece(null)
             setSelectedPocket(null)
@@ -519,12 +594,14 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
             return
           }
           pieceToDrop = selectedPieceObj.type
+          pieceId = selectedPieceObj.id
         } else {
           // For standard, selectedPocketPiece is just the piece type string
           pieceToDrop = selectedPocketPiece as string
         }
 
-        makeMove({ to: square, piece: pieceToDrop, drop: true })
+        // Pass pieceId for withTimer variant
+        makeMove({ to: square, piece: pieceToDrop, drop: true, ...(pieceId ? { id: pieceId } : {}) })
       } else {
         Alert.alert("Invalid Drop", "You can only drop a piece on an empty square.")
       }
@@ -553,6 +630,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         setPromotionModal({ visible: true, from: selectedSquare, to: square, options: ["q", "r", "b", "n"] })
         return
       }
+
       makeMove({ from: selectedSquare, to: square })
       setPromotionModal(null)
       setSelectedSquare(null)
@@ -621,77 +699,91 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     return `${minutes}:${seconds.toString().padStart(2, "0")}`
   }
 
+  // Update the formatDropTime function to only show seconds
   function formatDropTime(milliseconds: number): string {
-    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0.0"
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0"
     const seconds = Math.floor(milliseconds / 1000)
-    const tenths = Math.floor((milliseconds % 1000) / 100)
-    return `${seconds}.${tenths}`
+    return `${seconds}`
   }
 
   // Pocket panel
   function renderPocketPanel(color: "white" | "black") {
-    const pocket = gameState.board.pocketedPieces[color] || []
     const isMyPocket = playerColor === color
     const isMyTurnForPocket = gameState.board.activeColor === color && isMyTurn
 
     if (gameState.subvariantName === "withTimer") {
-      const frozen = gameState.board.frozenPieces?.[color] || []
-      const dropTimersMap = new Map(Object.entries(gameState.board.dropTimers?.[color] || {}))
-
-      let activeDroppablePiece: PocketPieceWithTimer | null = null
-      let activeDropTimerRemaining: number | null = null
-
-      if (pocket.length > 0) {
-        const firstPiece = pocket[0] as PocketPieceWithTimer
-        const expirationTimestamp = dropTimersMap.get(firstPiece.id)
-        if (expirationTimestamp) {
-          const remaining = expirationTimestamp - Date.now()
-          if (remaining > 0) {
-            activeDroppablePiece = firstPiece
-            activeDropTimerRemaining = remaining
-          }
-        }
-      }
+      // Get all pieces in the pocket
+      const pocket = (gameState.board.pocketedPieces[color] || []) as PocketPieceWithTimerType[]
+      // Get available/droppable pieces for reference
+      const availableDropPieces = gameState.board.availableDropPieces?.[color] || []
+      // Get drop timers map
+      const dropTimersMap = getDropTimersMap(gameState.board.dropTimers, color)
 
       return (
         <View style={styles.pocketPanel}>
           <Text style={styles.pocketLabel}>{color === "white" ? "White Pocket" : "Black Pocket"}</Text>
-          <View style={styles.pocketPieces}>
-            {activeDroppablePiece && (
-              <TouchableOpacity
-                key={activeDroppablePiece.id}
-                style={[
-                  styles.pocketPiece,
-                  (selectedPocketPiece as PocketPieceWithTimer)?.id === activeDroppablePiece.id &&
-                  selectedPocket === color
-                    ? styles.selectedPocketPiece
-                    : null,
-                ]}
-                onPress={() => {
-                  setSelectedPocketPiece(activeDroppablePiece)
-                  setSelectedPocket(color)
-                }}
-                disabled={!isMyTurnForPocket}
-              >
-                <Text style={styles.pieceText}>{PIECE_SYMBOLS[activeDroppablePiece.type]}</Text>
-                {activeDropTimerRemaining !== null && (
-                  <Text style={styles.dropTimerText}>{formatDropTime(localDropTimers[color] || 0)}</Text>
-                )}
-              </TouchableOpacity>
-            )}
-            {frozen.map((piece) => (
-              <View key={piece.id} style={styles.frozenPocketPiece}>
-                <Text style={styles.pieceText}>{PIECE_SYMBOLS[piece.type]}</Text>
-              </View>
-            ))}
+          <View style={styles.pocketSectionsContainer}>
+            {/* All pocket pieces section */}
+            <View style={styles.droppablePieceSection}>
+              {pocket.length > 0 ? (
+                pocket.map((piece) => {
+                  const isDroppable = availableDropPieces.some(p => p.id === piece.id && p.canDrop)
+                  const expirationTimestamp = dropTimersMap.get(piece.id)
+                  const remaining = expirationTimestamp ? expirationTimestamp - Date.now() : null
+                  
+                  return (
+                    <TouchableOpacity
+                      key={piece.id}
+                      style={[
+                        styles.pocketPiece,
+                        (selectedPocketPiece as any)?.id === piece.id && selectedPocket === color
+                          ? styles.selectedPocketPiece
+                          : null,
+                        !isDroppable && styles.nonDroppablePiece,
+                        // Add warning styles for urgency
+                        remaining !== null && remaining <= 5000 ? styles.pocketPieceWarning : null,
+                      ]}
+                      onPress={() => {
+                        if (isDroppable && isMyTurnForPocket) {
+                          setSelectedPocketPiece(piece)
+                          setSelectedPocket(color)
+                        }
+                      }}
+                      disabled={!isMyTurnForPocket || !isDroppable}
+                    >
+                      <Text style={styles.pieceText}>
+                        {PIECE_SYMBOLS[piece.type as keyof typeof PIECE_SYMBOLS]}
+                      </Text>
+                      {remaining !== null && (
+                        <View style={styles.dropTimerOverlay}>
+                          <Text style={styles.dropTimerValueText}>
+                            {formatDropTime(Math.max(0, remaining))}
+                          </Text>
+                        </View>
+                      )}
+                      {!isDroppable && (
+                        <View style={styles.frozenSignOverlay}>
+                          <Text style={styles.frozenSignText}>❄️</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  )
+                })
+              ) : (
+                <View style={styles.emptyPocketSection}>
+                  <Text style={styles.noPieceText}>No pieces in pocket</Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
       )
     } else {
       // Standard Crazyhouse variant (pocketedPieces are strings)
+      const pocket = gameState.board.pocketedPieces[color] || []
       const pieceCounts: { [key: string]: number } = {}
       pocket.forEach((piece) => {
-        const pieceType = (piece as PocketPieceStandard).type || (piece as string) // Handle both potential types
+        const pieceType = (piece as PocketPieceStandardType).type || (piece as string)
         pieceCounts[pieceType] = (pieceCounts[pieceType] || 0) + 1
       })
 
@@ -712,7 +804,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                 }}
                 disabled={!isMyTurnForPocket}
               >
-                <Text style={styles.pieceText}>{PIECE_SYMBOLS[pieceType]}</Text>
+                <Text style={styles.pieceText}>{PIECE_SYMBOLS[pieceType as keyof typeof PIECE_SYMBOLS]}</Text>
                 {count > 1 && <Text style={styles.pocketCount}>x{count}</Text>}
               </TouchableOpacity>
             ))}
@@ -741,7 +833,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         ]}
         onPress={() => handleSquarePress(square)}
       >
-        {piece && <Text style={styles.pieceText}>{PIECE_SYMBOLS[piece]}</Text>}
+        {piece && <Text style={styles.pieceText}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>}
         {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
         {isPossibleMove && piece && <View style={styles.captureIndicator} />}
       </TouchableOpacity>
@@ -792,6 +884,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   // Move history modal
   function renderMoveHistory() {
     if (!showMoveHistory) return null
+
     const moves = moveHistory
 
     return (
@@ -981,19 +1074,112 @@ const styles = StyleSheet.create({
   },
   activeTimer: { borderColor: "#90EE90" },
   timer: { color: "#fff", fontWeight: "bold", fontFamily: "monospace", fontSize: 20 },
-  pocketPanel: { flexDirection: "row", alignItems: "center", marginVertical: 8 },
-  pocketLabel: { color: "#fff", marginRight: 8 },
-  pocketPieces: { flexDirection: "row" },
-  pocketPiece: { backgroundColor: "#333", borderRadius: 4, padding: 8, marginHorizontal: 2 },
-  selectedPocketPiece: { backgroundColor: "#60a5fa" },
-  pocketCount: { color: "#a1a1aa", fontSize: 12, marginLeft: 2 },
-  dropTimerText: { color: "#fff", fontSize: 12, marginTop: 4, fontFamily: "monospace" },
-  frozenPocketPiece: {
-    backgroundColor: "#555", // A different background for frozen pieces
+  // General pocket panel styles
+  pocketPanel: {
+    flexDirection: "column", // Changed to column to stack droppable and frozen sections
+    alignItems: "center",
+    marginVertical: 8,
+    width: "90%", // Give it some width
+  },
+  pocketLabel: { color: "#fff", marginBottom: 8, fontSize: 16, fontWeight: "bold" },
+  // New styles for organizing withTimer pockets
+  pocketSectionsContainer: {
+    flexDirection: "column",
+    width: "100%",
+    alignItems: "center",
+  },
+  droppablePieceSection: {
+    flexDirection: "row", // Pieces in a row
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+    minHeight: 40, // Ensure consistent height even if no piece
+  },
+  frozenPiecesSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center", // Center the frozen pieces
+    flexWrap: "wrap", // Allow pieces to wrap if too many
+    borderTopWidth: 1,
+    borderTopColor: "#333",
+    paddingTop: 8,
+  },
+  frozenLabel: {
+    color: "#ccc",
+    marginRight: 8,
+    fontSize: 14,
+  },
+  frozenPiecesContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap", // Allow pieces to wrap
+    justifyContent: "center",
+  },
+  noPieceText: {
+    color: "#999",
+    fontSize: 14,
+    fontStyle: "italic",
+    paddingVertical: 8,
+  },
+  // Existing pocket piece styles (re-applied or adjusted)
+  pocketPieces: {
+    flexDirection: "row",
+    flexWrap: "wrap", // For standard, allow wrapping
+    justifyContent: "center",
+  },
+  pocketPiece: {
+    backgroundColor: "#333",
     borderRadius: 4,
     padding: 8,
     marginHorizontal: 2,
-    opacity: 0.6, // Make them slightly transparent
+    flexDirection: "column", // Allow text and piece to stack
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative", // Added for absolute positioning of timer overlay
+  },
+  selectedPocketPiece: { backgroundColor: "#60a5fa" },
+  pocketCount: { color: "#a1a1aa", fontSize: 12, marginLeft: 2 },
+  // Renamed and adjusted for the timer clock overlay
+  dropTimerOverlay: {
+    position: 'absolute',
+    top: -8,
+    left: '50%',
+    transform: [{ translateX: -15 }],
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  dropTimerValueText: {
+    // New name for the timer text style
+    color: "#fff",
+    fontSize: 10, // Smaller font for clock
+    fontFamily: "monospace",
+  },
+  frozenPocketPiece: {
+    backgroundColor: "#444", // Slightly different background
+    borderRadius: 4,
+    padding: 8,
+    marginHorizontal: 2,
+    opacity: 1, // Full opacity but distinct color
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative", // Added for absolute positioning of frozen sign
+  },
+  // New styles for the frozen sign overlay
+  frozenSignOverlay: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 4,
+    width: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  frozenSignText: {
+    fontSize: 10,
   },
   bottomBar: {
     flexDirection: "row",
@@ -1081,4 +1267,29 @@ const styles = StyleSheet.create({
   promotionPiece: { fontSize: 28, textAlign: "center", color: "#000" },
   cancelButton: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: "#666", borderRadius: 8 },
   cancelButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  // New style for non-droppable pieces
+  nonDroppablePiece: {
+    opacity: 0.6,
+    backgroundColor: '#444',
+  },
+  // New style for empty pocket section
+  emptyPocketSection: {
+    minHeight: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Add new styles for warning states
+  dropTimerWarning: {
+    backgroundColor: 'rgba(255,59,48,0.8)', // Red background for urgency
+  },
+  
+  dropTimerValueWarning: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  
+  pocketPieceWarning: {
+    borderWidth: 2,
+    borderColor: '#ff3b30',
+  },
 })
