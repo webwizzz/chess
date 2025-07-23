@@ -800,7 +800,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           <View style={styles.moveHistoryModal}>
             <View style={styles.moveHistoryHeader}>
               <Text style={styles.moveHistoryTitle}>Moves</Text>
-              <Text style={styles.moveHistoryTitle}>Moves</Text>
               <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
@@ -930,8 +929,6 @@ const styles = StyleSheet.create({
     position: "relative",
     borderWidth: 1,
     borderColor: "#444",
-    borderWidth: 1,
-    borderColor: "#444",
   },
   selectedSquare: { backgroundColor: "#f7ec74" },
   possibleMoveSquare: { backgroundColor: "rgba(255,255,0,0.3)" },
@@ -946,14 +943,6 @@ const styles = StyleSheet.create({
   },
   captureIndicator: {
     position: "absolute",
-    top: 0,
-    right: 0,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 16,
-    borderTopWidth: 16,
-    borderLeftColor: "transparent",
-    borderTopColor: "rgba(255,0,0,0.3)",
     top: 0,
     right: 0,
     width: 0,
