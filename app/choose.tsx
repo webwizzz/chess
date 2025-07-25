@@ -1,21 +1,22 @@
 import { getSocket } from "@/utils/socketManager";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Animated,
   Dimensions,
-  SafeAreaView,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
-  Modal,
+  View
 } from "react-native";
 import Svg, { Path } from 'react-native-svg';
+import Layout from './components/Layout';
+import VariantCard from './components/VariantCard';
+import TournamentScreen from "./tournament";
 
 export default function Choose() {
   const { width, height } = Dimensions.get("window");
@@ -24,27 +25,35 @@ export default function Choose() {
   const variants = [
     {
       name: "decay",
-      title: "Decay Chess",
+      title: "Decay",
+      subtitle: "Pieces decay after some time • 100 coins per win",
       description: "Pieces decay after a set number of moves. Adapt your strategy!",
-      rules: "In Decay Chess, each piece has a limited lifespan measured in moves. After a certain number of moves, pieces will 'decay' and be removed from the board. Plan your strategy carefully as your pieces won't last forever!"
+      rules: "In Decay Chess, each piece has a limited lifespan measured in moves. After a certain number of moves, pieces will 'decay' and be removed from the board. Plan your strategy carefully as your pieces won't last forever!",
+      color: "#2C2C2E"
     },
     {
       name: "sixpointer",
-      title: "Six Pointer",
+      title: "6 Point Chess",
+      subtitle: "Win by points after 6 moves each • 100 coins per win",
       description: "Each piece has a point value. Score 6 points to win!",
-      rules: "Each piece has a specific point value: Pawn=1, Knight/Bishop=3, Rook=5, Queen=9. Capture opponent pieces to accumulate points. First player to reach 6 points wins the game!"
+      rules: "Each piece has a specific point value: Pawn=1, Knight/Bishop=3, Rook=5, Queen=9. Capture opponent pieces to accumulate points. First player to reach 6 points wins the game!",
+      color: "#2C2C2E"
     },
     {
       name: "crazyhouse",
-      title: "Crazyhouse with Timer",
+      title: "Crazyhouse ",
+      subtitle: "Crazyhouse without time pressure • 100 coins per win",
       description: "Captured pieces return to your hand. Play fast!",
-      rules: "When you capture an opponent's piece, it joins your reserves and can be dropped back onto the board as your own piece on any empty square. This creates dynamic and tactical gameplay with time pressure!"
+      rules: "When you capture an opponent's piece, it joins your reserves and can be dropped back onto the board as your own piece on any empty square. This creates dynamic and tactical gameplay with time pressure!",
+      color: "#2C2C2E"
     },
     {
       name: "classic",
-      title: "Classic",
+      title: "Classic Chess",
+      subtitle: "Play offline with a friend",
       description: "The traditional chess game with no special rules.",
-      rules: "Standard chess rules apply. The objective is to checkmate your opponent's king. Pieces move according to traditional chess rules with no modifications."
+      rules: "Standard chess rules apply. The objective is to checkmate your opponent's king. Pieces move according to traditional chess rules with no modifications.",
+      color: "#2C2C2E"
     },
   ];
 
@@ -52,13 +61,10 @@ export default function Choose() {
   const [userName, setUserName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [socketConnecting, setSocketConnecting] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showProfileCard, setShowProfileCard] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [selectedVariantRules, setSelectedVariantRules] = useState("");
   const [selectedVariantTitle, setSelectedVariantTitle] = useState("");
-  
-  const sidebarAnim = useRef(new Animated.Value(-width)).current;
 
   useEffect(() => {
     const init = async () => {
@@ -82,17 +88,6 @@ export default function Choose() {
     };
     init();
   }, []);
-
-  useEffect(() => {
-    Animated.timing(sidebarAnim, {
-      toValue: isSidebarOpen ? 0 : -width,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-  }, [isSidebarOpen, sidebarAnim, width]);
-
-  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
-  const closeSidebar = () => setIsSidebarOpen(false);
 
   const handleVariantSelect = async (variant: string) => {
     if (!userId) {
@@ -164,27 +159,20 @@ export default function Choose() {
   };
 
   const handleProfile = () => {
-    closeSidebar();
     setShowProfileCard(true);
   };
 
   const handleLeaderboard = () => {
-    closeSidebar();
     router.push({ pathname: "/leaderboard" } as any);
   };
 
   const handleLogout = async () => {
     try {
       await AsyncStorage.removeItem("user");
-      setUserId(null);
-      setUserName("Guest");
-      closeSidebar();
-      setTimeout(() => {
-        router.replace({ pathname: "/Login" } as any);
-      }, 100);
+      router.push("/Login");
     } catch (e) {
-      console.error("Failed to logout", e);
-      Alert.alert("Logout Failed", "There was an error logging out. Please try again.");
+      console.error("Error logging out:", e);
+      Alert.alert("Error", "Failed to log out.");
     }
   };
 
@@ -214,33 +202,22 @@ export default function Choose() {
     </Svg>
   );
 
+  const [isChooseScreen, setIsChooseScreen] = useState(true);
+
+  const handleToggleScreen = () => {
+    setIsChooseScreen(!isChooseScreen);
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Top Navigation Bar */}
-      <View style={styles.topNavBar}>
-        <TouchableOpacity style={styles.topNavButton} onPress={handleProfile}>
-          <View style={styles.profileIconPlaceholder} />
-          <Text style={styles.topNavButtonText}>Profile</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.topNavButton} onPress={handleLeaderboard}>
-          <Text style={styles.topNavButtonText}>🏆</Text>
-          <Text style={styles.topNavButtonText}>Leaderboard</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.topNavButton}>
-          <Text style={styles.topNavButtonText}>✉️</Text>
-          <Text style={styles.topNavButtonText}>Newsletter</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Main Content Area */}
-      <ScrollView contentContainerStyle={styles.scrollViewContent}>
-        {/* Battle Mode Header */}
-        <View style={styles.battleModeContainer}>
-          <Text style={styles.battleModeTitle}>Battle Mode</Text>
-        </View>
-
-        <Text style={styles.sectionTitle}>For You</Text>
-
+    <Layout
+      onProfile={handleProfile}
+      onTournament={handleTournamentSelect}
+      onLogout={handleLogout}
+      isChooseScreen={isChooseScreen}
+      onToggleScreen={handleToggleScreen}
+    >
+      {isChooseScreen ? (
+        <ScrollView contentContainerStyle={styles.scrollViewContent}>
         {socketConnecting && (
           <View style={styles.connectingContainer}>
             <ActivityIndicator size="large" color="#00A862" />
@@ -251,48 +228,20 @@ export default function Choose() {
         {/* Variants Section */}
         <View style={styles.variantsColumn}>
           {variants.map((variant) => (
-            <View
-              key={variant.title}
-              style={[
-                styles.variantCardNew,
-                (!userId || socketConnecting) && styles.cardDisabled,
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.variantCardContent}
-                activeOpacity={0.85}
-                onPress={() => handleVariantSelect(variant.name)}
-                disabled={!userId || socketConnecting}
-              >
-                <Text style={styles.variantCardTitleNew}>{variant.title}</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                
-                onPress={() => handleInfoPress(variant)}
-              >
-                <InfoIcon />
-              </TouchableOpacity>
-            </View>
+            <VariantCard
+              key={variant.name}
+              variantName={variant.title}
+              description={variant.description}
+              activePlayers={25} // This should be dynamic from your backend
+              onPlay={() => handleVariantSelect(variant.name)}
+
+            />
           ))}
         </View>
       </ScrollView>
-
-      {/* Bottom Navigation Bar */}
-      <View style={styles.bottomNavBar}>
-        <TouchableOpacity style={styles.bottomNavButton} onPress={handleProfile}>
-          <Text style={styles.bottomNavButtonIcon}>👤</Text>
-          <Text style={styles.bottomNavButtonText}>Profile</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomNavButton} onPress={handleTournamentSelect}>
-          <Text style={styles.bottomNavButtonIcon}>🏆</Text>
-          <Text style={styles.bottomNavButtonText}>Tournament</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomNavButton} onPress={handleLogout}>
-          <Text style={styles.bottomNavButtonIcon}>➡️</Text>
-          <Text style={styles.bottomNavButtonText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
+      ) : (
+        <TournamentScreen userId={userId} />
+      )}
 
       {/* Rules Modal */}
       <Modal
@@ -314,38 +263,6 @@ export default function Choose() {
         </View>
       </Modal>
 
-      {/* Sidebar Overlay and Sidebar */}
-      {isSidebarOpen && (
-        <TouchableOpacity
-          style={styles.overlay}
-          activeOpacity={1}
-          onPress={closeSidebar}
-        />
-      )}
-
-      <Animated.View
-        style={[
-          styles.sidebar,
-          { width: width * 0.75, transform: [{ translateX: sidebarAnim }] },
-        ]}
-      >
-        <View style={styles.sidebarHeader}>
-          <Text style={styles.sidebarHeaderText}>Menu</Text>
-          <TouchableOpacity onPress={closeSidebar} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity style={styles.sidebarItem} onPress={handleProfile}>
-          <Text style={styles.sidebarItemText}>Profile</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.sidebarItem} onPress={handleLeaderboard}>
-          <Text style={styles.sidebarItemText}>Leaderboard</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.sidebarItem} onPress={handleLogout}>
-          <Text style={[styles.sidebarItemText, styles.logoutText]}>Logout</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
       {/* Profile Card Overlay */}
       {showProfileCard && (
         <View style={styles.profileOverlay}>
@@ -365,70 +282,63 @@ export default function Choose() {
           </View>
         </View>
       )}
-    </SafeAreaView>
+    </Layout>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1A1A1A",
-  },
-  topNavBar: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingVertical: 10,
-    backgroundColor: "#222222",
-    borderBottomWidth: 1,
-    borderBottomColor: "#333333",
-  },
-  topNavButton: {
-    alignItems: "center",
-    paddingHorizontal: 10,
-  },
-  profileIconPlaceholder: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#00A862",
-    marginBottom: 4,
-  },
-  topNavButtonText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "600",
+    backgroundColor: "#1C1C1E",
   },
   scrollViewContent: {
     flexGrow: 1,
-    padding: 15,
+    padding: 20,
+  },
+  featuredCard: {
+    backgroundColor: "#F2E7D5",
+    borderRadius: 10,
+    padding: 20,
+    marginBottom: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  featuredCardContent: {
+    flex: 1,
+  },
+  featuredTitle: {
+    color: "#8B4513",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  featuredSubtitle: {
+    color: "#8B4513",
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 8,
+  },
+  featuredStats: {
+    flexDirection: "row",
     alignItems: "center",
   },
-  battleModeContainer: {
-    width: "100%",
-    alignItems: "center",
-    marginBottom: 30,
-    marginTop: 20,
+  featuredStatsIcon: {
+    fontSize: 16,
+    marginRight: 4,
   },
-  battleModeTitle: {
-    fontSize: 42,
+  featuredStatsText: {
+    color: "#4A90E2",
+    fontSize: 16,
     fontWeight: "bold",
-    color: "#00A862",
-    fontFamily: "Knewave-Regular",
-    textAlign: "center",
-    textShadowColor: "rgba(0, 168, 98, 0.4)",
-    textShadowOffset: { width: 2, height: 3 },
-    textShadowRadius: 6,
-    letterSpacing: 1,
-    transform: [{ rotate: '-1deg' }],
   },
-  sectionTitle: {
-    color: "#FFFFFF",
-    fontSize: 16, // Reduced from 20 to 16
-    fontWeight: "bold",
-    marginBottom: 15,
-    alignSelf: 'flex-start',
-    marginLeft: 10,
+  featuredArrow: {
+    padding: 10,
   },
   connectingContainer: {
     marginBottom: 20,
@@ -442,46 +352,8 @@ const styles = StyleSheet.create({
   variantsColumn: {
     flexDirection: 'column',
     width: '100%',
-  },
-  variantCardNew: {
-    backgroundColor: "#222222",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 15,
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    borderColor: '#444444',
-    borderWidth: 1,
-    minHeight: 70,
-  },
-  variantCardContent: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  variantCardTitleNew: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "bold",
-    textAlign: "left",
-  },
-  infoButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: "rgba(0, 168, 98, 0.1)",
-    borderWidth: 1,
-    borderColor: "#00A862",
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardDisabled: {
-    opacity: 0.5,
+    padding: 10,
+    gap: 10,
   },
   modalOverlay: {
     flex: 1,
@@ -491,13 +363,13 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   rulesModal: {
-    backgroundColor: "#222222",
+    backgroundColor: "#3A3A3C",
     borderRadius: 16,
     padding: 24,
     width: "100%",
     maxWidth: 400,
     maxHeight: "80%",
-    borderColor: "#444444",
+    borderColor: "#48484A",
     borderWidth: 1,
   },
   rulesTitle: {
@@ -529,81 +401,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
   },
-  bottomNavBar: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingVertical: 10,
-    backgroundColor: "#222222",
-    borderTopWidth: 1,
-    borderTopColor: "#333333",
-  },
-  bottomNavButton: {
-    alignItems: "center",
-    paddingHorizontal: 10,
-  },
-  bottomNavButtonIcon: {
-    fontSize: 24,
-    color: "#FFFFFF",
-    marginBottom: 4,
-  },
-  bottomNavButtonText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  overlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    zIndex: 10,
-  },
-  sidebar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    bottom: 0,
-    backgroundColor: "#2C2F33",
-    zIndex: 20,
-    paddingTop: 20,
-  },
-  sidebarHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#36393F",
-  },
-  sidebarHeaderText: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "bold",
-  },
-  closeButton: {
-    padding: 5,
-  },
-  closeButtonText: {
-    color: "#fff",
-    fontSize: 24,
-  },
-  sidebarItem: {
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#36393F",
-  },
-  sidebarItemText: {
-    color: "#fff",
-    fontSize: 18,
-  },
-  logoutText: {
-    color: "#FF4D4D",
-  },
   profileOverlay: {
     position: "absolute",
     top: 0,
@@ -616,7 +413,7 @@ const styles = StyleSheet.create({
     zIndex: 30,
   },
   profileCard: {
-    backgroundColor: "#23272A",
+    backgroundColor: "#3A3A3C",
     borderRadius: 16,
     padding: 28,
     width: 320,
@@ -653,5 +450,19 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "bold",
+  },
+  tournamentButton: {
+    width: '40%',
+  },
+  tournamentIconContainer: {
+    height: 60,
+    paddingVertical: 6,
+  },
+  tournamentIconBackground: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  tournamentButtonText: {
+    fontSize: 13,
+    bottom: 2,
   },
 });
