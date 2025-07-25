@@ -225,7 +225,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           (firstPiece as availableDropPieceType).timerPaused &&
           (firstPiece as availableDropPieceType).remainingTime !== undefined
         ) {
-          expirationTimestamp = Date.now() + (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+          expirationTimestamp = Date.now() + firstPiece && (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
         }
 
         if (expirationTimestamp) {
@@ -311,7 +311,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                   (firstPiece as availableDropPieceType).timerPaused &&
                   (firstPiece as availableDropPieceType).remainingTime !== undefined
                 ) {
-                  expirationTimestamp = now + (firstPiece as availableDropPieceType).remainingTime
+                  expirationTimestamp = now + firstPiece && (firstPiece as availableDropPieceType).remainingTime
                 }
 
                 if (expirationTimestamp) {
@@ -399,7 +399,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                 (firstPiece as availableDropPieceType).timerPaused &&
                 (firstPiece as availableDropPieceType).remainingTime !== undefined
               ) {
-                expirationTimestamp = now + (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+                expirationTimestamp = now + firstPiece && (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
               }
               if (expirationTimestamp) {
                 newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
@@ -487,7 +487,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                 (firstPiece as availableDropPieceType).timerPaused &&
                 (firstPiece as availableDropPieceType).remainingTime !== undefined
               ) {
-                expirationTimestamp = now + (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+                expirationTimestamp = now + firstPiece && (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
               }
               if (expirationTimestamp) {
                 newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
