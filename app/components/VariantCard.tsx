@@ -7,13 +7,15 @@ interface VariantCardProps {
   activePlayers: number;
   description: string;
   onPlay: () => void;
+  closingTime?: string;
 }
 
 export default function VariantCard({ 
   variantName, 
   activePlayers, 
   description, 
-  onPlay
+  onPlay,
+  closingTime
 }: VariantCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
@@ -57,7 +59,12 @@ export default function VariantCard({
     <View style={styles.card}>
       <View style={styles.cardContent}>
         <View style={styles.header}>
-          <Text style={styles.variantName}>{variantName}</Text>
+          <View style={styles.titleSection}>
+            <Text style={styles.variantName}>{variantName}</Text>
+            {closingTime && (
+              <Text style={styles.closingTime}>Closing at {closingTime}</Text>
+            )}
+          </View>
           <TouchableOpacity style={styles.playButton} onPress={onPlay}>
             <Text style={styles.playButtonText}>PLAY</Text>
           </TouchableOpacity>
@@ -127,10 +134,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
+  titleSection: {
+    flex: 1,
+    marginRight: 16,
+  },
   variantName: {
     color: '#FFFFFF',
     fontSize: 28,
     fontWeight: '600',
+  },
+  closingTime: {
+    color: '#FFA500',
+    fontSize: 14,
+    marginTop: 4,
+    fontWeight: '500',
   },
   liveSection: {
     marginHorizontal: -16,

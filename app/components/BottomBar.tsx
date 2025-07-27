@@ -6,13 +6,15 @@ interface BottomBarProps {
   onProfile: () => void;
   onTournament: () => void;
   onLogout: () => void;
+  onHome: () => void;
+  onToggleScreen: () => void;
 }
 
-export default function BottomBar({ onProfile, onTournament, onLogout }: BottomBarProps) {
+export default function BottomBar({ onProfile, onTournament, onLogout, onHome, onToggleScreen }: BottomBarProps) {
   return (
     <View style={styles.bottomNavBar}>
       {/* Home Button */}
-      <TouchableOpacity style={styles.bottomNavButton} onPress={onLogout}>
+      <TouchableOpacity style={styles.bottomNavButton} onPress={onHome}>
         <View style={styles.iconContainer}>
           <Svg width="24" height="24" viewBox="0 0 45 45" style={styles.icon}>
             <Path
@@ -51,7 +53,7 @@ export default function BottomBar({ onProfile, onTournament, onLogout }: BottomB
       </TouchableOpacity>
 
       {/* Tournament Button */}
-      <TouchableOpacity style={styles.bottomNavButton} onPress={onTournament}>
+      <TouchableOpacity style={styles.bottomNavButton} onPress={onToggleScreen}>
         <View style={styles.iconContainer}>
           <Image 
             source={require("../../assets/cup.svg")} 
