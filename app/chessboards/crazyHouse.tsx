@@ -4,8 +4,20 @@ import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
-import { getSocketInstance } from "../utils/socketManager"
-import type { CrazyHouseChessGameProps, Move, PocketPieceStandardType, PocketPieceWithTimerType } from "./types"; // Declare CrazyHouseChessGameProps and Move
+import { getSocketInstance } from "../../utils/socketManager"
+import type { CrazyHouseChessGameProps, Move, PocketPieceStandardType, PocketPieceWithTimerType } from "../../src/types"; // Declare CrazyHouseChessGameProps and Move
+// Define types for pocket pieces
+interface PocketPieceStandard {
+  type: string // e.g., "p", "n", "b"
+}
+
+interface PocketPieceWithTimer {
+  type: string
+  id: string
+  capturedAt: number
+}
+
+type PocketPiece = PocketPieceStandard | PocketPieceWithTimer
 
 // Types
 type PocketPieceType = PocketPieceStandardType | PocketPieceWithTimerType
@@ -155,7 +167,9 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   const [socket, setSocket] = useState<Socket | null>(null)
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null)
   const [possibleMoves, setPossibleMoves] = useState<string[]>([])
+
   const [selectedPocketPiece, setSelectedPocketPiece] = useState<string | PocketPieceWithTimerType | null>(null)
+
   const [selectedPocket, setSelectedPocket] = useState<"white" | "black" | null>(null)
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [playerColor, setPlayerColor] = useState<"white" | "black">("white")
@@ -281,7 +295,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         const now = Date.now()
         let newWhite = prevMainTimers.white
         let newBlack = prevMainTimers.black
-        // Updates both main game clock and piece drop timers
         if (activeColor === "white") {
           newWhite = Math.max(0, newWhite - 100)
         } else {
@@ -498,7 +511,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         } else {
           setLocalDropTimers({ white: null, black: null })
         }
-
         // Update local main timers based on the new board state
         setLocalTimers({
           white: newState.board.whiteTime,
@@ -599,7 +611,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           // For standard, selectedPocketPiece is just the piece type string
           pieceToDrop = selectedPocketPiece as string
         }
-
         // Pass pieceId for withTimer variant
         makeMove({ to: square, piece: pieceToDrop, drop: true, ...(pieceId ? { id: pieceId } : {}) })
       } else {
@@ -804,7 +815,9 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                 }}
                 disabled={!isMyTurnForPocket}
               >
+
                 <Text style={styles.pieceText}>{PIECE_SYMBOLS[pieceType as keyof typeof PIECE_SYMBOLS]}</Text>
+
                 {count > 1 && <Text style={styles.pocketCount}>x{count}</Text>}
               </TouchableOpacity>
             ))}

@@ -1,10 +1,10 @@
 "use client"
 
+import { getSocketInstance } from "@/utils/socketManager"
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
-import { getSocketInstance } from "../utils/socketManager"
 // Removed GameControls import as it's no longer needed
 
 // Types

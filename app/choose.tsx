@@ -87,7 +87,7 @@ export default function Choose() {
       console.log("Matchmaking socket connected for variant select.");
       socketInstance.off("connect", onConnectSuccess);
       socketInstance.off("connect_error", onConnectError);
-      socketInstance.emit("tournament:join", { userId });
+      socketInstance.emit("queue:join", { variant });
       router.replace({ pathname: "/matchmaking", params: { variant, userId } });
       setSocketConnecting(false);
     };
@@ -118,6 +118,7 @@ export default function Choose() {
       console.log("Matchmaking socket connected for tournament.");
       socketInstance.off("connect", onConnectSuccess);
       socketInstance.off("connect_error", onConnectError);
+      socketInstance.emit("tournament:join");
       router.replace({ pathname: "/tournament", params: { userId } });
       setSocketConnecting(false);
     };

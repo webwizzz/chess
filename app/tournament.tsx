@@ -3,24 +3,24 @@
 import { useRouter } from "expo-router"
 import { useCallback, useEffect, useState } from "react"
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native"
 import Svg, { Path } from "react-native-svg"
 import type { Socket } from "socket.io-client"
 import { getSocket, getSocketInstance } from "../utils/socketManager"
-import ChessGame from "./ChessGame"
-import DecayChessGame from "./Decay"
-import SixPointChessGame from "./SixPointer"
 import VariantCard from "./components/VariantCard"
-import CrazyHouse from "./crazyHouse"
+import ChessGame from "./chessboards/classic"
+import DecayChessGame from "./chessboards/Decay"
+import SixPointerChessGame from "./chessboards/SixPointer"
+import CrazyHouseChessGame from "./chessboards/crazyHouse"
 
 // Re-use the GameState interface or import it if defined in a shared file
 interface GameState {
@@ -429,9 +429,9 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
       case "decay":
         return <DecayChessGame initialGameState={gameState} userId={userId} />
       case "sixpointer":
-        return <SixPointChessGame initialGameState={gameState} userId={userId} />
+        return <SixPointerChessGame initialGameState={gameState} userId={userId} />
       case "crazyhouse":
-        return <CrazyHouse initialGameState={gameState} userId={userId} />
+        return <CrazyHouseChessGame initialGameState={gameState} userId={userId} />
       default:
         return <Text style={styles.errorText}>Unsupported variant: {matchedVariant}</Text>
     }
