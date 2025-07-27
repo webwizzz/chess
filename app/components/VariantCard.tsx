@@ -8,6 +8,7 @@ interface VariantCardProps {
   description: string;
   onPlay: () => void;
   closingTime?: string;
+  disabled: boolean;
 }
 
 export default function VariantCard({ 
@@ -15,11 +16,13 @@ export default function VariantCard({
   activePlayers, 
   description, 
   onPlay,
-  closingTime
+  closingTime,
+  disabled
 }: VariantCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
   const expandAnim = React.useRef(new Animated.Value(0)).current;
+  console.log(disabled)
 
   React.useEffect(() => {
     const pulse = Animated.sequence([
@@ -65,7 +68,7 @@ export default function VariantCard({
               <Text style={styles.closingTime}>Closing at {closingTime}</Text>
             )}
           </View>
-          <TouchableOpacity style={styles.playButton} onPress={onPlay}>
+          <TouchableOpacity style={styles.playButton} onPress={onPlay} disabled={disabled}>
             <Text style={styles.playButtonText}>PLAY</Text>
           </TouchableOpacity>
         </View>

@@ -63,6 +63,23 @@ export default function Choose() {
   const [selectedVariantRules, setSelectedVariantRules] = useState("");
   const [selectedVariantTitle, setSelectedVariantTitle] = useState("");
 
+  useEffect(() => {
+    const fetchUserId = async () => {
+      try {
+        const storedUser = await AsyncStorage.getItem("user");
+        if (storedUser) {
+          const user = JSON.parse(storedUser);
+          setUserId(user._id);
+        }
+        console.log("found user")
+      } catch (e) {
+        console.error("Error fetching user ID:", e);
+      }
+    };
+
+    fetchUserId();
+  }, [])
+
  
 
   const handleVariantSelect = async (variant: string) => {
@@ -105,34 +122,7 @@ export default function Choose() {
   };
 
   const handleTournamentSelect = async () => {
-    if (!userId) {
-      Alert.alert("Login Required", "Please log in to join tournaments.");
-      return;
-    }
-
-    setSocketConnecting(true);
-    const socketInstance = getSocket(userId, "matchmaking");
-    socketInstance.connect();
-
-    const onConnectSuccess = () => {
-      console.log("Matchmaking socket connected for tournament.");
-      socketInstance.off("connect", onConnectSuccess);
-      socketInstance.off("connect_error", onConnectError);
-      socketInstance.emit("tournament:join");
-      router.replace({ pathname: "/tournament", params: { userId } });
-      setSocketConnecting(false);
-    };
-
-    const onConnectError = (error: Error) => {
-      console.error("Matchmaking socket connection error:", error);
-      Alert.alert("Connection Failed", "Failed to connect to the server for tournaments. Please try again.");
-      socketInstance.off("connect", onConnectSuccess);
-      socketInstance.off("connect_error", onConnectError);
-      setSocketConnecting(false);
-    };
-
-    socketInstance.on("connect", onConnectSuccess);
-    socketInstance.on("connect_error", onConnectError);
+    router.replace({ pathname: "/tournament" });
   };
 
   const handleProfile = () => {
@@ -214,13 +204,13 @@ export default function Choose() {
               description={variant.description}
               activePlayers={25} // This should be dynamic from your backend
               onPlay={() => handleVariantSelect(variant.name)}
-
+              disabled={userId ? false : true}
             />
           ))}
         </View>
       </ScrollView>
       ) : (
-        <TournamentScreen userId={userId || ''} />
+        <TournamentScreen />
       )}
 
       {/* Rules Modal */}
