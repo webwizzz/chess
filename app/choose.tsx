@@ -58,36 +58,12 @@ export default function Choose() {
   ];
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [socketConnecting, setSocketConnecting] = useState(false);
-  const [showProfileCard, setShowProfileCard] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [selectedVariantRules, setSelectedVariantRules] = useState("");
   const [selectedVariantTitle, setSelectedVariantTitle] = useState("");
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const storedUser = await AsyncStorage.getItem("user");
-        if (storedUser) {
-          const parsedUser = JSON.parse(storedUser);
-          setUserId(parsedUser._id);
-          setUserName(parsedUser.name || `User ${parsedUser._id.substring(0, 4)}`);
-          setUserEmail(parsedUser.email || "No email");
-        } else {
-          setUserName("Guest");
-          setUserEmail("No email");
-        }
-      } catch (err) {
-        console.error("Error initializing user:", err);
-        Alert.alert("Error", "Failed to load user data.");
-        setUserName("Guest");
-        setUserEmail("No email");
-      }
-    };
-    init();
-  }, []);
+ 
 
   const handleVariantSelect = async (variant: string) => {
     if (!userId) {
@@ -160,7 +136,7 @@ export default function Choose() {
   };
 
   const handleProfile = () => {
-    setShowProfileCard(true);
+    router.push({ pathname: '/profile' } as any);
   };
 
   const handleLeaderboard = () => {
@@ -175,16 +151,6 @@ export default function Choose() {
       console.error("Error logging out:", e);
       Alert.alert("Error", "Failed to log out.");
     }
-  };
-
-  const handleCloseProfileCard = () => {
-    setShowProfileCard(false);
-  };
-
-  const handleInfoPress = (variant: any) => {
-    setSelectedVariantRules(variant.rules);
-    setSelectedVariantTitle(variant.title);
-    setShowRulesModal(true);
   };
 
   const closeRulesModal = () => {
@@ -219,6 +185,19 @@ export default function Choose() {
     >
       {isChooseScreen ? (
         <ScrollView contentContainerStyle={styles.scrollViewContent}>
+        {/* Navigation Buttons */}
+        <View style={styles.navButtonsContainer}>
+          <TouchableOpacity style={styles.navButton} onPress={handleLeaderboard}>
+            <Text style={styles.navButtonText}>Leaderboard</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navButton} onPress={() => setShowRulesModal(true)}>
+            <Text style={styles.navButtonText}>Rules</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Heading */}
+        <Text style={styles.heading}>Choose Variant</Text>
+
         {socketConnecting && (
           <View style={styles.connectingContainer}>
             <ActivityIndicator size="large" color="#00A862" />
@@ -241,7 +220,7 @@ export default function Choose() {
         </View>
       </ScrollView>
       ) : (
-        <TournamentScreen userId={userId} />
+        <TournamentScreen userId={userId || ''} />
       )}
 
       {/* Rules Modal */}
@@ -263,26 +242,6 @@ export default function Choose() {
           </View>
         </View>
       </Modal>
-
-      {/* Profile Card Overlay */}
-      {showProfileCard && (
-        <View style={styles.profileOverlay}>
-          <View style={styles.profileCard}>
-            <Text style={styles.profileTitle}>Profile</Text>
-            <Text style={styles.profileLabel}>Name:</Text>
-            <Text style={styles.profileValue}>{userName}</Text>
-            <Text style={styles.profileLabel}>Email:</Text>
-            <Text style={styles.profileValue}>{userEmail}</Text>
-            <Text style={styles.profileLabel}>Matches Won:</Text>
-            <Text style={styles.profileValue}>12</Text>
-            <Text style={styles.profileLabel}>Matches Lost:</Text>
-            <Text style={styles.profileValue}>5</Text>
-            <TouchableOpacity style={styles.closeProfileBtn} onPress={handleCloseProfileCard}>
-              <Text style={styles.closeProfileBtnText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
     </Layout>
   );
 }
@@ -402,56 +361,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
   },
-  profileOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 30,
-  },
-  profileCard: {
-    backgroundColor: "#3A3A3C",
-    borderRadius: 16,
-    padding: 28,
-    width: 320,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  profileTitle: {
-    color: "#00A862",
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 18,
-  },
-  profileLabel: {
-    color: "#b0b3b8",
-    fontSize: 16,
-    marginTop: 8,
-  },
-  profileValue: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  closeProfileBtn: {
-    marginTop: 24,
-    backgroundColor: "#00A862",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 24,
-  },
-  closeProfileBtnText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
   tournamentButton: {
     width: '40%',
   },
@@ -465,5 +374,35 @@ const styles = StyleSheet.create({
   tournamentButtonText: {
     fontSize: 13,
     bottom: 2,
+  },
+  navButtonsContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    height: 30,
+    gap: 5,
+    backgroundColor: '#1C1C1E',
+  },
+  navButton: {
+    flex: 1,
+    backgroundColor: '#2C2C2E',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100%',
+    borderBottomWidth: 1,
+    borderBottomColor: '#48484A',
+  },
+  navButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  heading: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'semibold',
+    marginBottom: 4,
+    marginTop: 16,
+    textAlign: 'left',
   },
 });

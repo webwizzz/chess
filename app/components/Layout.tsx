@@ -11,6 +11,7 @@ interface LayoutProps {
   onLogout: () => void;
   isChooseScreen?: boolean;
   onToggleScreen: () => void;
+  hideTopNav?: boolean;
 }
 
 export default function Layout({ 
@@ -19,16 +20,18 @@ export default function Layout({
   onTournament, 
   onLogout, 
   isChooseScreen = true,
-  onToggleScreen 
+  onToggleScreen,
+  hideTopNav = false
 }: LayoutProps) {
   return (
     <SafeAreaView style={styles.container}>
       <HeaderBar />
-      <TopNavBar 
-        onProfile={onProfile} 
-        isChooseScreen={isChooseScreen}
-        onToggleScreen={onToggleScreen}
-      />
+      {!hideTopNav && (
+        <TopNavBar 
+          isChooseScreen={isChooseScreen}
+          onToggleScreen={onToggleScreen}
+        />
+      )}
       <View style={styles.content}>
         {children}
       </View>
@@ -36,6 +39,8 @@ export default function Layout({
         onProfile={onProfile}
         onTournament={onTournament}
         onLogout={onLogout}
+        onHome={onToggleScreen}
+        onToggleScreen={onToggleScreen}
       />
     </SafeAreaView>
   );

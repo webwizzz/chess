@@ -143,40 +143,19 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
   const [selectedRulesTitle, setSelectedRulesTitle] = useState("")
   const [selectedRulesContent, setSelectedRulesContent] = useState("")
 
-  // Tournament options data with specific heights
-  const tournamentOptions = [
-    {
-      title: "Leaderboard",
-      description: "View tournament rankings and top players",
-      action: "leaderboard",
-      rules:
-        "Tournament leaderboard shows player rankings based on their performance in tournaments. Points are awarded based on placement: 1st place gets 100 points, 2nd gets 75 points, 3rd gets 50 points, and participation gives 10 points.",
-      flex: 0.2,
-      isMainCard: false,
-    },
-    {
-      title: "Victory Rush",
-      description: activeTournament
-        ? `${activeTournament.name} - ${activeTournament.participantsCount}/${activeTournament.capacity} players`
-        : "Join the current active tournament",
-      action: "tournament",
-      rules: activeTournament
-        ? `Tournament: ${activeTournament.name}\nEntry Fee: ₹${activeTournament.entryFee}\nPrize Pool: ₹${activeTournament.prizePool}\nCapacity: ${activeTournament.capacity} players\nStatus: ${activeTournament.status.toUpperCase()}`
-        : "No active tournament available. Join to create or participate in tournaments.",
-      flex: 0.6,
-      isMainCard: true,
-      image: require("../assets/ttt.png"),
-    },
-    {
-      title: "Rules & Terms",
-      description: "Tournament rules and terms of service",
-      action: "rules",
-      rules:
-        "Tournament Rules:\n\n1. Fair Play: No cheating or external assistance allowed\n2. Time Control: Standard tournament time controls apply\n3. Conduct: Respectful behavior required at all times\n4. Entry Fees: Non-refundable once tournament starts\n5. Prizes: Distributed based on final standings\n6. Disputes: Contact support for any issues\n\nTerms of Service:\n- Players must be 13+ years old\n- Account suspension for rule violations\n- Prize distribution within 24 hours of tournament completion",
-      flex: 0.2,
-      isMainCard: false,
-    },
-  ]
+  // Tournament option data
+  const tournamentOptions = [{
+    title: "Victory Rush",
+    description: activeTournament
+      ? `${activeTournament.name} - ${activeTournament.participantsCount}/${activeTournament.capacity} players`
+      : "Join the current active tournament",
+    action: "tournament",
+    rules: activeTournament
+      ? `Tournament: ${activeTournament.name}\nEntry Fee: ₹${activeTournament.entryFee}\nPrize Pool: ₹${activeTournament.prizePool}\nCapacity: ${activeTournament.capacity} players\nStatus: ${activeTournament.status.toUpperCase()}`
+      : "No active tournament available. Join to create or participate in tournaments.",
+    isMainCard: true,
+    image: require("../assets/ttt.png"),
+  }]
 
   // Custom Info Icon Component
   const InfoIcon = () => (
@@ -390,9 +369,8 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
       return
     }
 
-    setIsJoiningTournament(true)
-    socket.emit("tournament:join", { userId })
-  }, [socket, userId, activeTournament])
+    router.push({ pathname: "/streakMaster", params: { userId } } as any)
+  }, [socket, userId, activeTournament, router])
 
   const handleLeaveTournament = useCallback(() => {
     if (!socket || !userId) {
@@ -479,9 +457,14 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
               resizeMode="contain"
             />
             <Text style={styles.victoryRushSubtitle}>Rack up wins.</Text>
+            {activeTournament && (
+              <Text style={styles.closingTimeText}>
+                Closing at {new Date(activeTournament.startTime + activeTournament.duration).toLocaleTimeString()}
+              </Text>
+            )}
             <TouchableOpacity 
               style={styles.joinNowButton}
-              onPress={() => handleJoinTournament()}
+              onPress={() => router.push({ pathname: "/streakMaster", params: { userId } } as any)}
               disabled={isTournamentQueueing || isJoiningTournament}
             >
               <Text style={styles.joinNowText}>Join Now</Text>
@@ -501,56 +484,14 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
 
         {/* Tournament Options */}
         <View style={styles.variantsColumn}>
-          {tournamentOptions.map((option) => (
-            option.isMainCard ? (
-              <VariantCard
-                key={option.title}
-                variantName={option.title}
-                activePlayers={activeTournament ? activeTournament.participantsCount : 0}
-                description={option.description}
-                onPlay={() => handleOptionPress(option.action)}
-              />
-            ) : (
-              <View
-                key={option.title}
-                style={[
-                  styles.variantCard,
-                  { backgroundColor: "#2C2C2E" }
-                ]}
-              >
-                <TouchableOpacity
-                  style={styles.variantCardContent}
-                  activeOpacity={0.85}
-                  onPress={() => handleOptionPress(option.action)}
-                >
-                  <View style={styles.cardLeft}>
-                    <View style={styles.variantIconContainer}>
-                      {option.action === "leaderboard" ? (
-                        <Svg width="42" height="42" viewBox="0 0 24 24">
-                          <Path
-                            d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z"
-                            fill="#fff"
-                          />
-                        </Svg>
-                      ) : (
-                        <Svg width="42" height="42" viewBox="0 0 24 24">
-                          <Path
-                            d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"
-                            fill="#fff"
-                          />
-                        </Svg>
-                      )}
-                    </View>
-                    <View style={styles.cardTextContainer}>
-                      <Text style={styles.variantTitle}>{option.title}</Text>
-                      <Text style={styles.variantSubtitle}>{option.description}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.arrowText}>›</Text>
-                </TouchableOpacity>
-              </View>
-            )
-          ))}
+          <VariantCard
+            key={tournamentOptions[0].title}
+            variantName={tournamentOptions[0].title}
+            activePlayers={activeTournament ? activeTournament.participantsCount : 0}
+            description={tournamentOptions[0].description}
+            onPlay={() => handleOptionPress(tournamentOptions[0].action)}
+            closingTime="11:59 PM"
+          />
           {isTournamentQueueing && (
             <Text style={styles.statusText}>Currently in queue - Tap to leave</Text>
           )}
@@ -618,6 +559,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginBottom: 20,
     opacity: 0.9,
+  },
+  closingTimeText: {
+    color: "#FFA500",
+    fontSize: 16,
+    marginBottom: 16,
+    fontWeight: "600",
   },
   joinNowButton: {
     backgroundColor: "#FFA500", // Orange color

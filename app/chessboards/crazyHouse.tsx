@@ -1,4 +1,5 @@
 "use client"
+
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
@@ -60,7 +61,6 @@ interface GameStateType {
     availableDropPieces?: {
       white: availableDropPieceType[]
       black: availableDropPieceType[]
-
     }
     // Backend sends this as a plain object, frontend converts to Map for internal use
     dropTimers: {
@@ -195,7 +195,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     white: null,
     black: null,
   })
-
   const timerRef = useRef<any>(null)
   const navigationTimeoutRef = useRef<any>(null)
 
@@ -222,7 +221,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     setBoardFlipped(userColor === "black")
     setIsMyTurn(initialGameState.board.activeColor === userColor)
     setMoveHistory(initialGameState.moves || []) // Initialize move history
-
 
     // Initialize local drop timers if it's a withTimer variant
     if (initialGameState.subvariantName === "withTimer") {
@@ -344,7 +342,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         return { white: newWhite, black: newBlack }
       })
     }, 100) // Update every 100ms for smoother countdown
-
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
@@ -534,7 +531,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
   function handleGameEndEvent(data: any) {
     const result = data.gameState?.gameState?.result || data.gameState?.result || data.winner || "unknown"
-
     const winner = data.gameState?.gameState?.winner || data.gameState?.winner || data.winner
     setIsWinner(winner === playerColor ? true : winner ? false : null)
     setGameEndMessage(result)
@@ -723,7 +719,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
   // Pocket panel
   function renderPocketPanel(color: "white" | "black") {
-    const pocket = gameState.board.pocketedPieces[color] || []
     const isMyPocket = playerColor === color
     const isMyTurnForPocket = gameState.board.activeColor === color && isMyTurn
 
@@ -852,7 +847,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
         onPress={() => handleSquarePress(square)}
       >
         {piece && <Text style={styles.pieceText}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>}
-
         {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
         {isPossibleMove && piece && <View style={styles.captureIndicator} />}
       </TouchableOpacity>
