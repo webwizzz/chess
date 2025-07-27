@@ -4,8 +4,8 @@ import { useRouter } from "expo-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
-import { getSocketInstance } from "../utils/socketManager"
-import { getPieceComponent } from "./chessPieces"
+import { getSocketInstance } from "@/utils/socketManager"
+import { getPieceComponent } from "../chessPieces"
 
 // Types
 interface Player {
