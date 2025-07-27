@@ -3,9 +3,8 @@ import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
-import { getSocketInstance } from "../utils/socketManager"
-import type { CrazyHouseChessGameProps, Move, PocketPieceStandardType, PocketPieceWithTimerType } from "./types"; // Declare CrazyHouseChessGameProps and Move
-
+import { getSocketInstance } from "../../utils/socketManager"
+import type { CrazyHouseChessGameProps, Move, PocketPieceStandardType, PocketPieceWithTimerType } from "../../src/types"; // Declare CrazyHouseChessGameProps and Move
 // Define types for pocket pieces
 interface PocketPieceStandard {
   type: string // e.g., "p", "n", "b"
@@ -192,11 +191,6 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     white: initialGameState.board.whiteTime, // Use board.whiteTime
     black: initialGameState.board.blackTime, // Use board.blackTime
   })
-  const [localDropTimers, setLocalDropTimers] = useState<{ white: number | null; black: number | null }>({
-    white: null,
-    black: null,
-  })
-
   const [localDropTimers, setLocalDropTimers] = useState<{ white: number | null; black: number | null }>({
     white: null,
     black: null,
@@ -1318,4 +1312,3 @@ const styles = StyleSheet.create({
     borderColor: '#ff3b30',
   },
 })
-

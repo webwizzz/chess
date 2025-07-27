@@ -3,10 +3,10 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Text, View } from "react-native"; // Import Alert
 import { Socket } from "socket.io-client";
 import { getSocket, getSocketInstance } from "../utils/socketManager";
-import ChessGame from "./ChessGame";
-import DecayChessGame from "./Decay";
-import SixPointChessGame from "./SixPointer";
-import CrazyHouse from "./crazyHouse";
+import ChessGame from "./chessboards/classic";
+import DecayChessGame from "./chessboards/Decay";
+import SixPointerChessGame from "./chessboards/SixPointer";
+import CrazyHouseChessGame from "./chessboards/crazyHouse";
 
 // Re-use the GameState interface or import it if defined in a shared file
 interface GameState {
@@ -247,14 +247,14 @@ export default function MatchMaking() {
         );
       case "sixpointer":
         return (
-          <SixPointChessGame
+          <SixPointerChessGame
             initialGameState={gameState}
             userId={userId}
           />
         );
       case "crazyhouse":
         return (
-          <CrazyHouse
+          <CrazyHouseChessGame
             initialGameState={gameState}
             userId={userId}
           />
