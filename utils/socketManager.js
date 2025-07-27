@@ -7,7 +7,8 @@ export const getSocket = (
   connectionType,
   sessionId,
   variant,
-  subvariant
+  subvariant,
+  source
 ) => {
   console.log("getSocket called with parameters:",  userId, connectionType, sessionId, variant, subvariant);
   if (!socketInstance || !socketInstance.connected) {
@@ -30,7 +31,7 @@ export const getSocket = (
     const socketUrl = `http://localhost:3000${namespace}`;
     const socketOptions = {
       path: "/socket.io",
-      auth: { userId, sessionId, variant, subvariant },
+      auth: { userId, sessionId, variant, subvariant, source },
       transports: ["websocket"],
       reconnection: true,
       reconnectionAttempts: 5,

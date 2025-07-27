@@ -456,6 +456,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
   const handleGameMove = (data: any) => {
     console.log("[MOVE] Move received:", data)
     if (data && data.gameState) {
+      
       const now = Date.now()
 
       if (isSixPointer) {
@@ -506,7 +507,9 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
             result = "black wins"
             winner = "black"
           }
-          handleGameEnd(result, winner, "6 moves completed", { finalPoints: points })
+          const whiteFinalPoints = data.gameState.gameState.finalPoints.white
+          const blackFinalPoints = data.gameState.gameState.finalPoints.black
+          handleGameEnd(result, winner, "6 moves completed", {finalPoints: { white: whiteFinalPoints, black: blackFinalPoints }})
           return
         }
 
@@ -659,7 +662,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
         moves: data.gameState.moves || [],
         lastMove: data.gameState.lastMove,
         moveCount: data.gameState.moveCount,
-      }))
+        }))
 
       setLocalTimers({
         white: newWhiteTime,

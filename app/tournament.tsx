@@ -1,26 +1,27 @@
 "use client"
 
+import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useRouter } from "expo-router"
 import { useCallback, useEffect, useState } from "react"
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from "react-native"
 import Svg, { Path } from "react-native-svg"
 import type { Socket } from "socket.io-client"
-import { getSocket, getSocketInstance } from "../utils/socketManager"
-import VariantCard from "./components/VariantCard"
+import { getSocket } from "../utils/socketManager"
 import ChessGame from "./chessboards/classic"
+import CrazyHouseChessGame from "./chessboards/crazyHouse"
 import DecayChessGame from "./chessboards/Decay"
 import SixPointerChessGame from "./chessboards/SixPointer"
-import CrazyHouseChessGame from "./chessboards/crazyHouse"
+import VariantCard from "./components/VariantCard"
 
 // Re-use the GameState interface or import it if defined in a shared file
 interface GameState {
@@ -121,11 +122,8 @@ interface TournamentDetails {
   createdAt: number
 }
 
-interface TournamentScreenProps {
-  userId: string;
-}
 
-export default function TournamentScreen({ userId }: TournamentScreenProps) {
+export default function TournamentScreen() {
   const router = useRouter()
   const [socket, setSocket] = useState<Socket | null>(null)
   const [activeTournament, setActiveTournament] = useState<TournamentDetails | null>(null)
@@ -142,6 +140,28 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
   const [showRulesModal, setShowRulesModal] = useState(false)
   const [selectedRulesTitle, setSelectedRulesTitle] = useState("")
   const [selectedRulesContent, setSelectedRulesContent] = useState("")
+  const [userId, setUserId] = useState(null)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [activeButton, setActiveButton] = useState<string | null>(null)
+  const [tournamentSocket, setTournamentSocket] = useState<Socket | null>(null);
+  const [tournamentStatus, setTournamentStatus] = useState<'idle' | 'joining' | 'queuing' | 'matched'>('idle');
+
+  useEffect(() => {
+    const fetchUserId = async () => {
+      try {
+        const storedUser = await AsyncStorage.getItem("user");
+        if (storedUser) {
+          const user = JSON.parse(storedUser);
+          setUserId(user._id);
+        }
+        console.log("found user")
+      } catch (e) {
+        console.error("Error fetching user ID:", e);
+      }
+    };
+
+    fetchUserId();
+  }, [])
 
   // Tournament option data
   const tournamentOptions = [{
@@ -166,166 +186,6 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
       />
     </Svg>
   )
-
-  // --- Socket Initialization and Cleanup ---
-  useEffect(() => {
-    const existingSocket = getSocketInstance()
-    if (existingSocket) {
-      setSocket(existingSocket)
-      console.log("Using existing socket instance for tournament screen")
-      existingSocket.onAny((event: string, ...args: any[]) => {
-        console.log("[SOCKET EVENT - TOURNAMENT SCREEN]", event, args)
-      })
-    } else {
-      Alert.alert("Connection Error", "Failed to connect to the server.", [
-        {
-          text: "OK",
-          onPress: () => {
-            setTimeout(() => {
-              router.replace("/choose")
-            }, 100)
-          },
-        },
-      ])
-    }
-
-    return () => {
-      if (existingSocket && existingSocket.connected && !isMatchFound) {
-        existingSocket.off("tournament:active_details")
-        existingSocket.off("tournament:joined")
-        existingSocket.off("tournament:left")
-        existingSocket.off("tournament:error")
-        existingSocket.off("queue:matched")
-        existingSocket.off("tournament:new_active")
-        existingSocket.off("queue:cooldown")
-      }
-    }
-  }, [isMatchFound, router])
-
-  // --- Tournament & Matchmaking Listeners ---
-  useEffect(() => {
-    if (!socket || !userId) {
-      console.log("Socket or userId not available for tournament listeners setup.")
-      return
-    }
-
-    socket.emit("tournament:get_active")
-
-    const handleActiveDetails = (response: { tournament: TournamentDetails | null }) => {
-      console.log("Active tournament details:", response.tournament)
-      setActiveTournament(response.tournament)
-      setIsJoiningTournament(false)
-    }
-
-    const handleNewActive = (response: { tournamentId: string; name: string }) => {
-      Alert.alert("New Tournament!", `A new tournament "${response.name}" (${response.tournamentId}) has started!`)
-      socket.emit("tournament:get_active")
-    }
-
-    const handleTournamentJoined = (response: { tournament: TournamentDetails }) => {
-      console.log("Joined tournament:", response.tournament)
-      setActiveTournament(response.tournament)
-      setIsJoiningTournament(false)
-      setIsTournamentQueueing(true)
-      setTimer(0)
-    }
-
-    const handleTournamentLeft = (response: { message: string }) => {
-      Alert.alert("Tournament Status", response.message)
-      setActiveTournament(null)
-      setIsTournamentQueueing(false)
-      setOpponent(null)
-      setTimer(0)
-      setIsJoiningTournament(false)
-    }
-
-    const handleTournamentError = (response: { message: string; error?: any }) => {
-      console.error("Tournament error:", response)
-      Alert.alert("Tournament Error", response.message + (response.error ? `: ${response.error}` : ""))
-      setIsJoiningTournament(false)
-      setIsTournamentQueueing(false)
-    }
-
-    const handleCooldown = (response: { until: number }) => {
-      const remainingSeconds = Math.ceil((response.until - Date.now()) / 1000)
-      Alert.alert("Cooldown", `You are on cooldown. Try again in ${remainingSeconds} seconds.`)
-      setIsJoiningTournament(false)
-      setIsTournamentQueueing(false)
-    }
-
-    const handleQueueMatched = (response: {
-      opponent: { userId: string; name: string }
-      variant: string
-      subvariant?: string
-      sessionId: string
-      gameState: GameState
-      tournamentMatch?: boolean
-    }) => {
-      console.log("Received match found response:", response)
-      setOpponent(response.opponent.name)
-      setGameState(response.gameState)
-      setMatchedVariant(response.variant)
-      setMatchedSubvariant(response.subvariant || null)
-      setTimer(0)
-
-      const matchType = response.tournamentMatch ? "Tournament Match!" : "Match Found!"
-      Alert.alert(
-        matchType,
-        `You've been matched in ${response.variant} ${response.subvariant || ""} with ${response.opponent.name}!`,
-      )
-
-      setTimeout(() => {
-        setIsMatchFound(true)
-        setLoading(true)
-
-        socket.off("tournament:active_details", handleActiveDetails)
-        socket.off("tournament:new_active", handleNewActive)
-        socket.off("tournament:joined", handleTournamentJoined)
-        socket.off("tournament:left", handleTournamentLeft)
-        socket.off("tournament:error", handleTournamentError)
-        socket.off("queue:cooldown", handleCooldown)
-        socket.off("queue:matched", handleQueueMatched)
-
-        console.log("Disconnecting lobby socket for game transition...")
-        socket.disconnect()
-        console.log("Lobby socket disconnected.")
-
-        const sessionId = response.sessionId
-        const gameSocketInstance = getSocket(userId, "game", sessionId, response.variant, response.subvariant)
-
-        if (!gameSocketInstance) {
-          console.error("Failed to get game socket instance")
-          Alert.alert("Failed to connect to game. Please try again.")
-          setLoading(false)
-          return
-        }
-
-        setGameSocket(gameSocketInstance)
-        console.log("Connected to game socket for session:", sessionId)
-        setLoading(false)
-      }, 2000)
-    }
-
-    socket.on("tournament:active_details", handleActiveDetails)
-    socket.on("tournament:new_active", handleNewActive)
-    socket.on("tournament:joined", handleTournamentJoined)
-    socket.on("tournament:left", handleTournamentLeft)
-    socket.on("tournament:error", handleTournamentError)
-    socket.on("queue:cooldown", handleCooldown)
-    socket.on("queue:matched", handleQueueMatched)
-
-    return () => {
-      if (socket && socket.connected) {
-        socket.off("tournament:active_details", handleActiveDetails)
-        socket.off("tournament:new_active", handleNewActive)
-        socket.off("tournament:joined", handleTournamentJoined)
-        socket.off("tournament:left", handleTournamentLeft)
-        socket.off("tournament:error", handleTournamentError)
-        socket.off("queue:cooldown", handleCooldown)
-        socket.off("queue:matched", handleQueueMatched)
-      }
-    }
-  }, [socket, userId])
 
   // --- Matchmaking Timer Effect ---
   useEffect(() => {
@@ -353,29 +213,141 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
   }, [timer, opponent, isMatchFound, isTournamentQueueing])
 
   // --- Handlers ---
-  const handleJoinTournament = useCallback(() => {
-    if (!socket || !userId) {
-      Alert.alert("Error", "Not connected to server or user not identified.")
-      return
-    }
+  const handlePlay = useCallback(async () => {
+    try {
+      if (!userId) {
+        Alert.alert("Error", "User not identified.")
+        return
+      }
 
-    if (activeTournament && activeTournament.status !== "open") {
-      Alert.alert("Tournament Closed", "Tournament registration is closed.")
-      return
-    }
+      if (activeTournament && activeTournament.status !== "open") {
+        Alert.alert("Tournament Closed", "Tournament registration is closed.")
+        return
+      }
 
-    if (activeTournament && activeTournament.participantsCount >= activeTournament.capacity) {
-      Alert.alert("Tournament Full", "This tournament has reached its maximum capacity.")
-      return
-    }
+      if (activeTournament && activeTournament.participantsCount >= activeTournament.capacity) {
+        Alert.alert("Tournament Full", "This tournament has reached its maximum capacity.")
+        return
+      }
 
-    router.push({ pathname: "/streakMaster", params: { userId } } as any)
-  }, [socket, userId, activeTournament, router])
+      setActiveButton("tournament")
+      setIsConnecting(true)
+      setTournamentStatus('joining')
+
+      // Create tournament socket connection
+      const tournamentSocketInstance = getSocket(userId, "matchmaking")
+      if (!tournamentSocketInstance) {
+        throw new Error("Failed to connect to tournament server")
+      }
+
+      // Set up tournament event listeners
+      tournamentSocketInstance.onAny((event: string, ...args: any[]) => {
+        console.log("[TOURNAMENT SOCKET EVENT]", event, args)
+      })
+
+      // Handle tournament join success
+      tournamentSocketInstance.on("tournament:joined", (response: { 
+        tournament: TournamentDetails,
+        status: 'already_joined' | 'newly_joined' 
+      }) => {
+        console.log("Tournament joined:", response)
+        setActiveTournament(response.tournament)
+        setIsJoiningTournament(false)
+        setIsTournamentQueueing(true)
+        setTournamentStatus('queuing')
+        setTimer(0)
+        setIsConnecting(false)
+        setActiveButton(null)
+      })
+
+      // Handle tournament errors
+      tournamentSocketInstance.on("tournament:error", (error: { message: string; error?: any }) => {
+        console.error("Tournament error:", error)
+        Alert.alert("Tournament Error", error.message + (error.error ? `: ${error.error}` : ""))
+        handleLeaveTournament()
+      })
+
+      // Handle active tournament details
+      tournamentSocketInstance.on("tournament:active_details", (response: { tournament: TournamentDetails | null }) => {
+        console.log("Active tournament details:", response.tournament)
+        setActiveTournament(response.tournament)
+        setIsJoiningTournament(false)
+      })
+
+      // Handle match found
+      tournamentSocketInstance.on("queue:matched", async (response: {
+        opponent: { userId: string; name: string }
+        variant: string
+        subvariant?: string
+        sessionId: string
+        gameState: GameState
+        tournamentMatch?: boolean
+      }) => {
+        console.log("Tournament match found:", response)
+        setTournamentStatus('matched')
+        
+        // Disconnect tournament socket
+        tournamentSocketInstance.disconnect()
+        setTournamentSocket(null)
+        
+        // Create game socket with tournament source
+        const gameSocketInstance = getSocket(
+          userId,
+          "game",
+          response.sessionId,
+          response.variant,
+          response.subvariant,
+          "tournament" // Specify tournament source
+        )
+
+        if (!gameSocketInstance) {
+          Alert.alert("Error", "Failed to connect to game server")
+          return
+        }
+
+        // Set up game state
+        setGameSocket(gameSocketInstance)
+        setGameState(response.gameState)
+        setMatchedVariant(response.variant)
+        setMatchedSubvariant(response.subvariant || null)
+        setIsMatchFound(true)
+        setOpponent(response.opponent.name)
+      })
+
+      // Store socket reference
+      setTournamentSocket(tournamentSocketInstance)
+
+      // Join tournament
+      tournamentSocketInstance.emit("tournament:join")
+
+      // Set connection timeout
+      setTimeout(() => {
+        if (isConnecting) {
+          setIsConnecting(false)
+          setActiveButton(null)
+          if (tournamentSocketInstance.connected) {
+            tournamentSocketInstance.disconnect()
+          }
+          setTournamentSocket(null)
+          setTournamentStatus('idle')
+          Alert.alert("Connection Timeout", "Failed to join tournament. Please try again.")
+        }
+      }, 10000)
+
+    } catch (error) {
+      console.error("Tournament join error:", error)
+      setIsConnecting(false)
+      setActiveButton(null)
+      setTournamentStatus('idle')
+      Alert.alert("Error", "Failed to join tournament. Please try again.")
+    }
+  }, [userId, activeTournament])
 
   const handleLeaveTournament = useCallback(() => {
-    if (!socket || !userId) {
-      Alert.alert("Error", "Not connected to server or user not identified.")
-      return
+    if (tournamentSocket) {
+      tournamentSocket.emit("tournament:leave")
+      tournamentSocket.disconnect()
+      setTournamentSocket(null)
     }
 
     setIsJoiningTournament(false)
@@ -387,27 +359,9 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
     setLoading(false)
     setMatchedVariant(null)
     setMatchedSubvariant(null)
+    setTournamentStatus('idle')
+  }, [tournamentSocket])
 
-    socket.emit("tournament:leave", { userId })
-  }, [socket, userId])
-
-  const handleOptionPress = (action: string) => {
-    switch (action) {
-      case "leaderboard":
-        router.push({ pathname: "/leaderboard" } as any)
-        break
-      case "tournament":
-        if (isTournamentQueueing) {
-          handleLeaveTournament()
-        } else {
-          handleJoinTournament()
-        }
-        break
-      case "rules":
-        // Rules are handled by info button
-        break
-    }
-  }
 
   const handleInfoPress = (option: any) => {
     setSelectedRulesTitle(option.title)
@@ -422,7 +376,7 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
   }
 
   // Render the appropriate game component
-  if (isMatchFound && gameState && gameSocket && matchedVariant) {
+  if (isMatchFound && gameState && gameSocket && matchedVariant && userId) {
     switch (matchedVariant) {
       case "classic":
         return <ChessGame initialGameState={gameState} userId={userId} />
@@ -489,8 +443,10 @@ export default function TournamentScreen({ userId }: TournamentScreenProps) {
             variantName={tournamentOptions[0].title}
             activePlayers={activeTournament ? activeTournament.participantsCount : 0}
             description={tournamentOptions[0].description}
-            onPlay={() => handleOptionPress(tournamentOptions[0].action)}
-            closingTime="11:59 PM"
+            onPlay={() => handlePlay()}
+            closingTime="9 PM"
+            disabled={isTournamentQueueing || isJoiningTournament || isConnecting}
+            // loading={isConnecting && activeButton === tournamentOptions[0].action}
           />
           {isTournamentQueueing && (
             <Text style={styles.statusText}>Currently in queue - Tap to leave</Text>
