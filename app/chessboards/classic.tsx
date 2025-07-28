@@ -5,6 +5,7 @@ import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
+import { getPieceComponent } from "../chessPieces"
 
 // Types
 interface Player {
@@ -110,21 +111,6 @@ interface ChessGameProps {
   initialGameState: GameState
   userId: string
   onNavigateToMenu?: () => void
-}
-
-const PIECE_SYMBOLS = {
-  r: "♜",
-  n: "♞",
-  b: "♝",
-  q: "♛",
-  k: "♚",
-  p: "♟",
-  R: "♖",
-  N: "♘",
-  B: "♗",
-  Q: "♕",
-  K: "♔",
-  P: "♙",
 }
 
 const PIECE_VALUES = {
@@ -938,9 +924,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       <View style={styles.capturedPieces}>
         {Object.entries(pieceCounts).map(([piece, count]) => (
           <View key={piece} style={styles.capturedPieceGroup}>
-            <Text style={[styles.capturedPiece, { fontSize: fontSizes.coordinates }]}>
-              {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
-            </Text>
+            <View style={{ width: fontSizes.coordinates, height: fontSizes.coordinates }}>
+              {getPieceComponent(piece, fontSizes.coordinates)}
+            </View>
             {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
           </View>
         ))}
@@ -985,24 +971,14 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
           },
           isLastMove && styles.lastMoveSquare,
           isSelected && styles.selectedSquare,
-          isPossibleMove && !isCapture && styles.possibleMoveSquare,
-          isCapture && styles.captureMoveSquare,
         ]}
         onPress={() => handleSquarePress(square)}
       >
         {piece && (
-          <Text
-            style={[
-              styles.piece,
-              {
-                fontSize: fontSizes.piece,
-              },
-            ]}
-          >
-            {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
-          </Text>
+          getPieceComponent(piece, squareSize * 0.8)
         )}
         {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
+        {isPossibleMove && isCapture && <View style={styles.captureDot} />}
       </TouchableOpacity>
     )
   }
@@ -1230,13 +1206,9 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
               {promotionModal &&
                 promotionModal.options.map((p) => (
                   <TouchableOpacity key={p} style={styles.promotionOption} onPress={() => handlePromotionSelect(p)}>
-                    <Text style={styles.promotionPiece}>
-                      {
-                        PIECE_SYMBOLS[
-                          (playerColor === "white" ? p.toUpperCase() : p.toLowerCase()) as keyof typeof PIECE_SYMBOLS
-                        ]
-                      }
-                    </Text>
+                    <View style={{ width: 40, height: 40, justifyContent: 'center', alignItems: 'center' }}>
+                      {getPieceComponent(playerColor === "white" ? p.toUpperCase() : p.toLowerCase(), 40)}
+                    </View>
                   </TouchableOpacity>
                 ))}
             </View>
@@ -1383,12 +1355,6 @@ const styles = StyleSheet.create({
   selectedSquare: {
     backgroundColor: "#f7ec74", // Same as last move for consistency
   },
-  possibleMoveSquare: {
-    backgroundColor: "rgba(255, 255, 0, 0.3)", // Subtle highlight for possible moves
-  },
-  captureMoveSquare: {
-    backgroundColor: "rgba(255, 0, 0, 0.3)", // Red tint for captures
-  },
   piece: {
     fontWeight: "bold",
     color: "#000",
@@ -1401,8 +1367,18 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: "rgba(0, 0, 0, 0.3)",
-    opacity: 0.8,
+    backgroundColor: "#4CAF50", // Green color for possible moves
+    opacity: 0.9,
+  },
+  captureDot: {
+    position: "absolute",
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#F44336", // Red color for captures
+    opacity: 0.9,
+    top: 4,
+    right: 4,
   },
   modalOverlay: {
     flex: 1,
