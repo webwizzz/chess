@@ -1,19 +1,42 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import Layout from './components/Layout';
 
 function Profile() {
+  const [user, setUser] = useState<{name: string, email: string} | null>(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const userData = await AsyncStorage.getItem('user');
+        if (userData) {
+          setUser(JSON.parse(userData));
+        }
+      } catch (error) {
+        console.error('Error loading user data:', error);
+      }
+    };
+    
+    loadUser();
+  }, []);
+
+  const name = user?.name || 'Guest';
+  const email = user?.email || 'Not provided';
+  const firstLetter = name.charAt(0).toUpperCase();
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Profile Header Box */}
       <View style={styles.profileBox}>
         <View style={styles.profileHeader}>
-          <View style={styles.avatar} />
-          <Text style={styles.profileName}>JatinpehlWan</Text>
-          <Text style={styles.profilePhone}>+919193550238</Text>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{firstLetter}</Text>
+          </View>
+          <Text style={styles.profileName}>{name}</Text>
+          <Text style={styles.profilePhone}>{email}</Text>
         </View>
       </View>
 
@@ -87,8 +110,8 @@ function Profile() {
           </View>
           <Text style={styles.optionText}>Help & Support</Text>
         </TouchableOpacity>
-        </View>
-      </ScrollView>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -100,53 +123,82 @@ const styles = StyleSheet.create({
   },
   profileBox: {
     backgroundColor: '#2C2C2E',
-    borderRadius: 10,
-    padding: 20,
+    borderRadius: 16,
+    padding: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   profileHeader: {
     alignItems: 'center',
-    marginBottom: 20,
   },
   avatar: {
     width: 80,
     height: 80,
     borderRadius: 40,
     backgroundColor: '#00A862',
-    marginBottom: 10,
+    marginBottom: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#00A862',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  avatarText: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textAlign: 'center',
   },
   profileName: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '700',
     color: '#FFFFFF',
+    marginBottom: 4,
+    textAlign: 'center',
   },
   profilePhone: {
-    fontSize: 14,
-    color: '#B0B0B0',
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
   },
   optionsContainer: {
-    marginTop: 20,
-    gap: 15, // Added gap between fields
+    marginTop: 24,
+    gap: 12,
   },
   optionButton: {
     backgroundColor: '#2C2C2E',
-    paddingVertical: 15,
+    paddingVertical: 16,
     paddingHorizontal: 20,
-    borderRadius: 10,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   iconContainer: {
-    marginRight: 10,
+    marginRight: 16,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   optionText: {
     fontSize: 16,
-    color: '#FFFFFF', // Updated to white
+    color: '#FFFFFF',
     fontWeight: '600',
+    flex: 1,
   },
 });
 
