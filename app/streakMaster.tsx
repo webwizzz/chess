@@ -480,75 +480,39 @@ export default function StreakMasterScreen() {
           <Text style={styles.sectionTitle}>Leaderboard</Text>
           
           {loading ? (
-            <View style={styles.leaderboardCard}>
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#FFD700" />
-                <Text style={styles.loadingText}>Loading leaderboard...</Text>
-              </View>
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#00A862" />
+              <Text style={styles.loadingText}>Loading leaderboard...</Text>
             </View>
           ) : leaderboardData ? (
-            <View style={styles.leaderboardCard}>
-              {/* Table Header */}
-              <View style={styles.tableHeader}>
-                <Text style={[styles.headerText, { flex: 1 }]}>Rank</Text>
-                <Text style={[styles.headerText, { flex: 2.5 }]}>Player</Text>
-                <Text style={[styles.headerText, { flex: 1.5 }]}>Streak</Text>
-              </View>
-              
-              {/* Table Rows */}
-              <View style={styles.tableBody}>
-                {leaderboardData.leaderboard.slice(0, 10).map((player: any, index: number) => (
-                  <View 
-                    key={player.player.id} 
-                    style={[
-                      styles.tableRow,
-                      player.player.id === userId && styles.currentUserRow,
-                      index === leaderboardData.leaderboard.slice(0, 10).length - 1 && styles.lastRow
-                    ]}
-                  >
-                    <View style={styles.rankCell}>
-                      <View style={[
-                        styles.rankBadge, 
-                        index < 3 && (styles as any)[`rank${index + 1}Badge`],
-                        player.player.id === userId && styles.currentUserBadge
+            <View>
+              {leaderboardData.leaderboard.slice(0, 10).map((player: any, index: number) => (
+                <View 
+                  key={player.player.id} 
+                  style={[
+                    styles.playerCard,
+                    player.player.id === userId && styles.currentPlayerCard
+                  ]}
+                >
+                  <View style={styles.playerRow}>
+                    <Text style={styles.playerRank}>#{player.rank}</Text>
+                    <View style={styles.playerDetails}>
+                      <Text style={[
+                        styles.playerName,
+                        player.player.id === userId && styles.currentPlayerName
                       ]}>
-                        <Text style={[
-                          styles.rankText,
-                          index < 3 && styles.topRankText,
-                          player.player.id === userId && styles.currentUserText
-                        ]}>
-                          {player.rank}
-                        </Text>
-                      </View>
-                    </View>
-                    
-                    <View style={styles.playerCell}>
-                      <View style={styles.playerInfo}>
-                        <Text style={[
-                          styles.playerName,
-                          player.player.id === userId && styles.currentUserText
-                        ]}>
-                          {player.player.name}
-                        </Text>
+                        {player.player.name}
                         {player.player.id === userId && (
-                          <View style={styles.youBadge}>
-                            <Text style={styles.youText}>You</Text>
-                          </View>
+                          <Text style={styles.youIndicator}> (You)</Text>
                         )}
-                      </View>
+                      </Text>
                     </View>
-                    
-                    <View style={styles.streakCell}>
-                      <View style={styles.streakBadge}>
-                        <Text style={styles.streakValue}>{player.player.currentTournamentStreak}</Text>
-                      </View>
-                    </View>
+                    <Text style={styles.playerStreak}>{player.player.currentTournamentStreak}</Text>
                   </View>
-                ))}
-              </View>
+                </View>
+              ))}
               
-              {/* Tournament Info */}
-              <View style={styles.tournamentFooter}>
+              <View style={styles.tournamentInfo}>
                 <Text style={styles.tournamentName}>{leaderboardData.tournament.name}</Text>
                 <Text style={styles.participantCount}>
                   {leaderboardData.tournament.totalParticipants} participants
@@ -556,14 +520,12 @@ export default function StreakMasterScreen() {
               </View>
             </View>
           ) : (
-            <View style={styles.leaderboardCard}>
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorEmoji}>⚠️</Text>
-                <Text style={styles.errorText}>Failed to load leaderboard</Text>
-                <TouchableOpacity onPress={fetchLeaderboard} style={styles.retryButton}>
-                  <Text style={styles.retryButtonText}>Try Again</Text>
-                </TouchableOpacity>
-              </View>
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorEmoji}>⚠️</Text>
+              <Text style={styles.errorText}>Failed to load leaderboard</Text>
+              <TouchableOpacity onPress={fetchLeaderboard} style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>Try Again</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -846,137 +808,61 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 24,
   },
-  leaderboardCard: {
+  playerCard: {
     backgroundColor: '#2C2C2E',
-    borderRadius: 20,
-    overflow: 'hidden',
+    borderRadius: 12,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  tableHeader: {
+  currentPlayerCard: {
+    backgroundColor: 'rgba(0, 168, 98, 0.1)',
+    borderColor: '#00A862',
+  },
+  playerRow: {
     flexDirection: 'row',
-    backgroundColor: '#3A3A3C',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-  },
-  headerText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  tableBody: {
-    backgroundColor: '#2C2C2E',
-  },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+    padding: 16,
   },
-  lastRow: {
-    borderBottomWidth: 0,
+  playerRank: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+    fontWeight: '600',
+    width: 40,
   },
-  currentUserRow: {
-    backgroundColor: 'rgba(0, 168, 98, 0.1)', // Changed from yellow to green
-    borderLeftWidth: 4,
-    borderLeftColor: '#00A862', // Changed from yellow to green
-  },
-
-  // Table Cells
-  rankCell: {
+  playerDetails: {
     flex: 1,
-    alignItems: 'center',
-  },
-  rankBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  rank1Badge: {
-    backgroundColor: '#00A862', // Changed from yellow to green
-  },
-  rank2Badge: {
-    backgroundColor: '#C0C0C0',
-  },
-  rank3Badge: {
-    backgroundColor: '#CD7F32',
-  },
-  currentUserBadge: {
-    backgroundColor: '#00A862', // Changed from yellow to green
-  },
-  rankText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  topRankText: {
-    color: '#000000',
-  },
-  currentUserText: {
-    color: '#000000',
-    fontWeight: '800',
-  },
-
-  playerCell: {
-    flex: 2.5,
-    paddingHorizontal: 12,
-  },
-  playerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    marginLeft: 12,
   },
   playerName: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
   },
-  youBadge: {
-    backgroundColor: '#00A862', // Changed from yellow to green
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    marginLeft: 8,
-  },
-  youText: {
-    color: '#000000',
-    fontSize: 12,
+  currentPlayerName: {
+    color: '#00A862',
     fontWeight: '700',
   },
-
-  streakCell: {
-    flex: 1.5,
-    alignItems: 'center',
+  youIndicator: {
+    color: '#00A862',
+    fontSize: 14,
+    fontWeight: '500',
   },
-  streakBadge: {
-    backgroundColor: 'rgba(0, 168, 98, 0.2)', // Changed from yellow to green
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#00A862', // Changed from yellow to green
-  },
-  streakValue: {
-    color: '#00A862', // Changed from yellow to green
+  playerStreak: {
+    color: '#00A862',
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
+    minWidth: 40,
+    textAlign: 'center',
   },
-
-  // Tournament Footer
-  tournamentFooter: {
-    backgroundColor: '#3A3A3C',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+  tournamentInfo: {
+    backgroundColor: '#2C2C2E',
+    borderRadius: 12,
+    padding: 16,
     alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   tournamentName: {
     color: '#FFFFFF',
