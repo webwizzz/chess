@@ -14,6 +14,7 @@ import {
   View
 } from "react-native";
 import Svg, { Path } from 'react-native-svg';
+import { shouldHideNavigation } from "../utils/navigationState";
 import Layout from './components/Layout';
 import VariantCard from './components/VariantCard';
 import TournamentScreen from "./tournament";
@@ -165,6 +166,22 @@ export default function Choose() {
     setIsChooseScreen(!isChooseScreen);
   };
 
+  // Check if navigation should be hidden (tournament match active)
+  const [hideNavigation, setHideNavigation] = useState(shouldHideNavigation());
+  
+  // Poll navigation state to detect changes
+  useEffect(() => {
+    const checkNavVisibility = () => {
+      const currentState = shouldHideNavigation();
+      if (currentState !== hideNavigation) {
+        setHideNavigation(currentState);
+      }
+    };
+    
+    const interval = setInterval(checkNavVisibility, 500);
+    return () => clearInterval(interval);
+  }, [hideNavigation]);
+
   return (
     <Layout
       onProfile={handleProfile}
@@ -172,6 +189,7 @@ export default function Choose() {
       onLogout={handleLogout}
       isChooseScreen={isChooseScreen}
       onToggleScreen={handleToggleScreen}
+      hideNavigation={hideNavigation}
     >
       {isChooseScreen ? (
         <ScrollView contentContainerStyle={styles.scrollViewContent}>

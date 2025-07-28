@@ -12,6 +12,7 @@ interface LayoutProps {
   isChooseScreen?: boolean;
   onToggleScreen: () => void;
   hideTopNav?: boolean;
+  hideNavigation?: boolean; // Added to hide all navigation elements
 }
 
 export default function Layout({ 
@@ -21,12 +22,13 @@ export default function Layout({
   onLogout, 
   isChooseScreen = true,
   onToggleScreen,
-  hideTopNav = false
+  hideTopNav = false,
+  hideNavigation = false
 }: LayoutProps) {
   return (
     <SafeAreaView style={styles.container}>
-      <HeaderBar />
-      {!hideTopNav && (
+      {!hideNavigation && <HeaderBar />}
+      {!hideNavigation && !hideTopNav && (
         <TopNavBar 
           isChooseScreen={isChooseScreen}
           onToggleScreen={onToggleScreen}
@@ -35,13 +37,15 @@ export default function Layout({
       <View style={styles.content}>
         {children}
       </View>
-      <BottomBar
-        onProfile={onProfile}
-        onTournament={onTournament}
-        onLogout={onLogout}
-        onHome={onToggleScreen}
-        onToggleScreen={onToggleScreen}
-      />
+      {!hideNavigation && (
+        <BottomBar
+          onProfile={onProfile}
+          onTournament={onTournament}
+          onLogout={onLogout}
+          onHome={onToggleScreen}
+          onToggleScreen={onToggleScreen}
+        />
+      )}
     </SafeAreaView>
   );
 }

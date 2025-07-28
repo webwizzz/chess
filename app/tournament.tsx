@@ -16,6 +16,7 @@ import {
 } from "react-native"
 import Svg, { Path } from "react-native-svg"
 import type { Socket } from "socket.io-client"
+import { setNavigationVisibility } from "../utils/navigationState"
 import { getSocket } from "../utils/socketManager"
 import ChessGame from "./chessboards/classic"
 import CrazyHouseChessGame from "./chessboards/crazyHouse"
@@ -350,6 +351,9 @@ export default function TournamentScreen() {
       setTournamentSocket(null)
     }
 
+    // Show navigation when leaving tournament
+    setNavigationVisibility(true);
+    
     setIsJoiningTournament(false)
     setIsTournamentQueueing(false)
     setOpponent(null)
@@ -377,6 +381,9 @@ export default function TournamentScreen() {
 
   // Render the appropriate game component
   if (isMatchFound && gameState && gameSocket && matchedVariant && userId) {
+    // Hide navigation when match is found
+    setNavigationVisibility(false);
+    
     switch (matchedVariant) {
       case "classic":
         return <ChessGame initialGameState={gameState} userId={userId} />
