@@ -461,59 +461,63 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
 
       if (isSixPointer) {
         // --- Sixpointer move logic ---
-        // Prefer backend values for moves left and points if available
         let movesPlayed = { white: 0, black: 0 }
         let movesLeft = { white: 6, black: 6 }
         let points = { white: 0, black: 0 }
 
-        // Try to get from board or gameState
+        // Get moves played
         if (data.gameState.board?.movesPlayed) {
           movesPlayed = data.gameState.board.movesPlayed
         } else if (data.gameState.gameState?.movesPlayed) {
           movesPlayed = data.gameState.gameState.movesPlayed
         }
 
-        if (data.gameState.board?.moveLeft) {
-          movesLeft = data.gameState.board.moveLeft
-        } else if (data.gameState.gameState?.moveLeft) {
-          movesLeft = data.gameState.gameState.moveLeft
-        } else {
-          // fallback: maxMoves - movesPlayed
-          const maxMoves = data.gameState.board?.maxMoves || data.gameState.gameState?.maxMoves || 6
-          movesLeft = {
-            white: maxMoves - (movesPlayed.white || 0),
-            black: maxMoves - (movesPlayed.black || 0),
-          }
-        }
-
+        // Get points
         if (data.gameState.board?.points) {
           points = data.gameState.board.points
         } else if (data.gameState.gameState?.points) {
           points = data.gameState.gameState.points
         }
 
-        setSixPointerMoves(movesPlayed)
+        // Calculate moves left including bonus moves
+        const maxMoves = data.gameState.board?.maxMoves || data.gameState.gameState?.maxMoves || 6
+        const bonusMoves = data.gameState.board?.bonusMoves || data.gameState.gameState?.bonusMoves || { white: 0, black: 0 }
+        
+        movesLeft = {
+          white: (maxMoves + bonusMoves.white) - movesPlayed.white,
+          black: (maxMoves + bonusMoves.black) - movesPlayed.black
+        }
 
+        setSixPointerMoves(movesPlayed)
         setSixPointerPoints(points)
 
-        // FIXED: Only end game if BOTH players have 0 moves left
+        console.log("[6PT DEBUG] Moves left:", movesLeft, "Points:", points, "Bonus moves:", bonusMoves)
+
+        // Check if game should end (both players exhausted their moves)
         if (movesLeft.white <= 0 && movesLeft.black <= 0) {
           let result = "draw"
           let winner: string | null = null
+          
           if (points.white > points.black) {
-            result = "white wins"
+            result = "points"
             winner = "white"
           } else if (points.black > points.white) {
-            result = "black wins"
+            result = "points"
             winner = "black"
           }
-          const whiteFinalPoints = data.gameState.gameState.finalPoints.white
-          const blackFinalPoints = data.gameState.gameState.finalPoints.black
-          handleGameEnd(result, winner, "6 moves completed", {finalPoints: { white: whiteFinalPoints, black: blackFinalPoints }})
+
+          // Use the actual points from the game state, not looking for finalPoints
+          const finalPoints = {
+            white: points.white,
+            black: points.black
+          }
+
+          console.log("[6PT GAME END] Both players out of moves. Winner:", winner, "Final points:", finalPoints)
+          handleGameEnd(result, winner, "6 moves completed", { finalPoints })
           return
         }
 
-        // Also handle checkmate, stalemate, etc. as usual
+        // Check for regular game end conditions
         if (
           data.gameState.gameState?.gameEnded ||
           data.gameState.gameState?.checkmate ||
@@ -542,7 +546,13 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
             winnerName = data.gameState.players[winner].username
           }
 
-          handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName, finalPoints: points })
+          // Use current points as final points
+          const finalPoints = {
+            white: points.white,
+            black: points.black
+          }
+
+          handleGameEnd(result, winner, endReason, { moveSan, moveMaker, winnerName, finalPoints })
           return
         }
 
@@ -565,7 +575,6 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
           moves: data.gameState.moves || [],
           lastMove: data.gameState.lastMove,
           moveCount: data.gameState.moveCount,
-          // Explicitly update movesPlayed and points from the calculated values
           movesPlayed: movesPlayed,
           points: points,
         }))
