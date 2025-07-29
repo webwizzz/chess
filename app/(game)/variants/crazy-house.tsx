@@ -1,10 +1,11 @@
 "use client"
 
-import { getSocketInstance } from "@/utils/socketManager"
+import { getSocketInstance } from "../../../utils/socketManager"
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
+import { getPieceComponent } from "../../components/game/chessPieces"
 
 // Define types for this component
 interface Move {
@@ -43,29 +44,6 @@ interface availableDropPieceType {
 }
 
 type PocketPieceType = PocketPieceStandardType | PocketPieceWithTimerType;
-
-// Define types for pocket pieces
-interface PocketPieceStandard {
-  type: string // e.g., "p", "n", "b"
-}
-
-interface PocketPieceWithTimer {
-  type: string
-  id: string
-  capturedAt: number
-}
-
-type PocketPiece = PocketPieceStandard | PocketPieceWithTimer
-
-interface availableDropPieceType {
-  canDrop: boolean
-  capturedAt: number
-  id: string
-  type: string // e.g., "p", "n", "b"
-  timeRemaining: number
-  timerPaused?: boolean // Added for local calculation
-  remainingTime?: number // Added for local calculation
-}
 
 interface GameStateType {
   sessionId: string
