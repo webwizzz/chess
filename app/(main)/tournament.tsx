@@ -425,7 +425,7 @@ export default function TournamentScreen() {
             )}
             <TouchableOpacity 
               style={styles.joinNowButton}
-              onPress={() => router.push({ pathname: "/streakMaster", params: { userId } } as any)}
+              onPress={() => router.push({ pathname: "/(main)/streak-master", params: { userId } } as any)}
               disabled={isTournamentQueueing || isJoiningTournament}
             >
               <Text style={styles.joinNowText}>Join Now</Text>

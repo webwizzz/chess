@@ -1,6 +1,6 @@
 "use client"
 
-import { getSocketInstance } from "@/utils/socketManager"
+import { getSocketInstance } from "../../../utils/socketManager"
 import { useRouter } from "expo-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"

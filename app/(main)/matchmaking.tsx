@@ -111,7 +111,10 @@ export default function MatchMaking() {
       });
     } else {
       Alert.alert("Connection failed", "Could not connect to the server.");
-      router.replace("/choose"); // Redirect if no socket
+      // Use setTimeout to delay navigation until after component is mounted
+      setTimeout(() => {
+        router.replace("/choose");
+      }, 100);
     }
 
     return () => {
@@ -186,7 +189,10 @@ export default function MatchMaking() {
       setOpponent(null);
       setTimer(0); // Reset timer on error
       Alert.alert("Queue Error", response.message || "An error occurred while matching");
-      router.replace("/choose"); // Redirect on error
+      // Use setTimeout to ensure navigation happens after current execution
+      setTimeout(() => {
+        router.replace("/choose");
+      }, 100);
     });
 
     socket.on("queue:cooldown", (response: { until: number }) => {

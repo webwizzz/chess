@@ -3,11 +3,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { Socket } from "socket.io-client";
-import { getSocket } from "../utils/socketManager";
-import ChessGame from "./chessboards/classic";
-import CrazyHouseChessGame from "./chessboards/crazyHouse";
-import DecayChessGame from "./chessboards/Decay";
-import SixPointerChessGame from "./chessboards/SixPointer";
+
+import SixPointerChessGame from '../(game)/variants/six-pointer';
+import { ClassicChess, CrazyHouseChess, DecayChess } from '../(game)/variants';
+import { getSocket } from '../../utils/socketManager';
 
 
 
@@ -328,7 +327,7 @@ export default function StreakMasterScreen() {
       case "decay":
         return <DecayChess initialGameState={gameState} userId={userId} />
       case "sixpointer":
-        return <SixPointerChess initialGameState={gameState} userId={userId} />
+        return <SixPointerChessGame initialGameState={gameState} userId={userId} />
       case "crazyhouse":
         return <CrazyHouseChess initialGameState={gameState} userId={userId} />
       default:
@@ -366,7 +365,7 @@ export default function StreakMasterScreen() {
           <View style={styles.cardBackground}>
              <View style={styles.victoryRushContent}>
               <Image 
-                source={require("../assets/tl.png")} 
+                source={require("../../assets/tl.png")} 
                 style={styles.victoryRushLogo}
                 resizeMode="contain"
               />

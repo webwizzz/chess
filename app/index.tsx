@@ -7,11 +7,14 @@ export default function Index() {
   React.useEffect(() => {
     const checkAuth = async () => {
       const token = await AsyncStorage.getItem('token');
-      if (token) {
-        router.replace('/choose');
-      } else {
-        router.replace('/Home');
-      }
+      // Add a small delay to ensure Root Layout is mounted
+      setTimeout(() => {
+        if (token) {
+          router.replace('/choose');
+        } else {
+          router.replace('/Home');
+        }
+      }, 100);
     };
     checkAuth();
   }, [router]);
