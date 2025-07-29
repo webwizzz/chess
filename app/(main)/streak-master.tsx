@@ -2,11 +2,11 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { Socket } from "socket.io-client";
-import { getSocket } from "../utils/socketManager";
-import ChessGame from "./chessboards/classic";
-import CrazyHouseChessGame from "./chessboards/crazyHouse";
-import DecayChessGame from "./chessboards/Decay";
-import SixPointerChessGame from "./chessboards/SixPointer";
+import ClassicChess from "../(game)/variants/classic";
+import CrazyHouseChess from "../(game)/variants/crazy-house";
+import DecayChess from "../(game)/variants/decay";
+import SixPointerChess from "../(game)/variants/six-pointer";
+import { getSocket } from "../../utils/socketManager";
 
 interface StreakMasterProps {
   userId?: string;
@@ -203,13 +203,13 @@ export default function StreakMasterScreen({ userId }: StreakMasterProps) {
   if (isMatchFound && gameState && gameSocket && matchedVariant && userId) {
     switch (matchedVariant) {
       case "classic":
-        return <ChessGame initialGameState={gameState} userId={userId} />
+        return <ClassicChess initialGameState={gameState} userId={userId} />
       case "decay":
-        return <DecayChessGame initialGameState={gameState} userId={userId} />
+        return <DecayChess initialGameState={gameState} userId={userId} />
       case "sixpointer":
-        return <SixPointerChessGame initialGameState={gameState} userId={userId} />
+        return <SixPointerChess initialGameState={gameState} userId={userId} />
       case "crazyhouse":
-        return <CrazyHouseChessGame initialGameState={gameState} userId={userId} />
+        return <CrazyHouseChess initialGameState={gameState} userId={userId} />
       default:
         return <Text style={styles.errorText}>Unsupported variant: {matchedVariant}</Text>
     }
@@ -232,7 +232,7 @@ export default function StreakMasterScreen({ userId }: StreakMasterProps) {
         <View style={styles.victoryRushCard}>
           <View style={styles.victoryRushContent}>
             <Image 
-              source={require("../assets/tl.png")} 
+              source={require("../../assets/tl.png")} 
               style={styles.victoryRushLogo}
               resizeMode="contain"
             />

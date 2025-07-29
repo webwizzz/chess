@@ -1,11 +1,49 @@
 "use client"
 
+import { getSocketInstance } from "@/utils/socketManager"
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
-import { getSocketInstance } from "../../utils/socketManager"
-import type { CrazyHouseChessGameProps, Move, PocketPieceStandardType, PocketPieceWithTimerType } from "../../src/types"; // Declare CrazyHouseChessGameProps and Move
+
+// Define types for this component
+interface Move {
+  from?: string;
+  to: string;
+  piece?: string;
+  captured?: string;
+  promotion?: string;
+  drop?: boolean;
+  id?: string;
+}
+
+interface CrazyHouseChessGameProps {
+  initialGameState: any;
+  userId: string;
+  onNavigateToMenu?: () => void;
+}
+
+interface PocketPieceStandardType {
+  type: string;
+}
+
+interface PocketPieceWithTimerType {
+  type: string;
+  timer?: number;
+  id?: string;
+  canDrop?: boolean;
+  remainingTime?: number;
+}
+
+interface availableDropPieceType {
+  type: string;
+  id: string;
+  canDrop: boolean;
+  remainingTime?: number;
+}
+
+type PocketPieceType = PocketPieceStandardType | PocketPieceWithTimerType;
+
 // Define types for pocket pieces
 interface PocketPieceStandard {
   type: string // e.g., "p", "n", "b"
@@ -18,9 +56,6 @@ interface PocketPieceWithTimer {
 }
 
 type PocketPiece = PocketPieceStandard | PocketPieceWithTimer
-
-// Types
-type PocketPieceType = PocketPieceStandardType | PocketPieceWithTimerType
 
 interface availableDropPieceType {
   canDrop: boolean

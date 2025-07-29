@@ -14,9 +14,9 @@ import {
   View
 } from "react-native";
 import Svg, { Path } from 'react-native-svg';
-import { shouldHideNavigation } from "../utils/navigationState";
-import Layout from './components/Layout';
-import VariantCard from './components/VariantCard';
+import { shouldHideNavigation } from "../../utils/navigationState";
+import Layout from '../components/layout/Layout';
+import VariantCard from '../components/ui/VariantCard';
 import TournamentScreen from "./tournament";
 
 export default function Choose() {
@@ -90,10 +90,10 @@ export default function Choose() {
     }
 
     if (variant === "classic") {
-      router.replace({ pathname: "/classictimecontrol", params: { userId } } as any);
+      router.replace({ pathname: "/(game)/time-controls/classic", params: { userId } } as any);
       return;
     } else if (variant === "crazyhouse") {
-      router.replace({ pathname: "/crazytimecontrol", params: { userId } } as any);
+      router.replace({ pathname: "/(game)/time-controls/crazy", params: { userId } } as any);
       return;
     }
 
@@ -137,7 +137,7 @@ export default function Choose() {
   const handleLogout = async () => {
     try {
       await AsyncStorage.removeItem("user");
-      router.push("/Login");
+      router.push("/(auth)/login");
     } catch (e) {
       console.error("Error logging out:", e);
       Alert.alert("Error", "Failed to log out.");

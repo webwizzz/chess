@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import NewsletterIcon from './NewsletterIcon';
-import UserAvatar from './UserAvatar';
+import NewsletterIcon from '../ui/NewsletterIcon';
+import UserAvatar from '../ui/UserAvatar';
 
 export default function HeaderBar() {
   return (

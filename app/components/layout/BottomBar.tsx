@@ -56,7 +56,7 @@ export default function BottomBar({ onProfile, onTournament, onLogout, onHome, o
       <TouchableOpacity style={styles.bottomNavButton} onPress={onToggleScreen}>
         <View style={styles.iconContainer}>
           <Image 
-            source={require("../../assets/cup.svg")} 
+            source={require("../../../assets/cup.svg")} 
             style={[styles.icon, { tintColor: '#FFFFFF' }]}
           />
           <Text style={styles.bottomNavButtonText}>Tournament</Text>

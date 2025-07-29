@@ -16,13 +16,13 @@ import {
 } from "react-native"
 import Svg, { Path } from "react-native-svg"
 import type { Socket } from "socket.io-client"
-import { setNavigationVisibility } from "../utils/navigationState"
-import { getSocket } from "../utils/socketManager"
-import ChessGame from "./chessboards/classic"
-import CrazyHouseChessGame from "./chessboards/crazyHouse"
-import DecayChessGame from "./chessboards/Decay"
-import SixPointerChessGame from "./chessboards/SixPointer"
-import VariantCard from "./components/VariantCard"
+import ClassicChess from "../(game)/variants/classic"
+import CrazyHouseChess from "../(game)/variants/crazy-house"
+import DecayChess from "../(game)/variants/decay"
+import SixPointerChess from "../(game)/variants/six-pointer"
+import { setNavigationVisibility } from "../../utils/navigationState"
+import { getSocket } from "../../utils/socketManager"
+import VariantCard from "../components/ui/VariantCard"
 
 // Re-use the GameState interface or import it if defined in a shared file
 interface GameState {
@@ -175,7 +175,7 @@ export default function TournamentScreen() {
       ? `Tournament: ${activeTournament.name}\nEntry Fee: ₹${activeTournament.entryFee}\nPrize Pool: ₹${activeTournament.prizePool}\nCapacity: ${activeTournament.capacity} players\nStatus: ${activeTournament.status.toUpperCase()}`
       : "No active tournament available. Join to create or participate in tournaments.",
     isMainCard: true,
-    image: require("../assets/ttt.png"),
+    image: require("../../assets/ttt.png"),
   }]
 
   // Custom Info Icon Component
@@ -386,13 +386,13 @@ export default function TournamentScreen() {
     
     switch (matchedVariant) {
       case "classic":
-        return <ChessGame initialGameState={gameState} userId={userId} />
+        return <ClassicChess initialGameState={gameState} userId={userId} />
       case "decay":
-        return <DecayChessGame initialGameState={gameState} userId={userId} />
+        return <DecayChess initialGameState={gameState} userId={userId} />
       case "sixpointer":
-        return <SixPointerChessGame initialGameState={gameState} userId={userId} />
+        return <SixPointerChess initialGameState={gameState} userId={userId} />
       case "crazyhouse":
-        return <CrazyHouseChessGame initialGameState={gameState} userId={userId} />
+        return <CrazyHouseChess initialGameState={gameState} userId={userId} />
       default:
         return <Text style={styles.errorText}>Unsupported variant: {matchedVariant}</Text>
     }
@@ -413,7 +413,7 @@ export default function TournamentScreen() {
         <View style={styles.victoryRushCard}>
           <View style={styles.victoryRushContent}>
             <Image 
-              source={require("../assets/tl.png")} 
+              source={require("../../assets/tl.png")} 
               style={styles.victoryRushLogo}
               resizeMode="contain"
             />

@@ -22,7 +22,7 @@ export default function TopNavBar({ isChooseScreen, onToggleScreen }: TopNavBarP
       >
         <View style={styles.iconContainer}>
             <Image 
-              source={require('../../assets/1v1.svg')} 
+              source={require('../../../assets/1v1.svg')} 
               style={[
                 styles.navIcon,
                 hoveredButton === '1v1' && styles.hoveredIcon
@@ -46,7 +46,7 @@ export default function TopNavBar({ isChooseScreen, onToggleScreen }: TopNavBarP
         >
           <View style={styles.iconContainer}>
             <Image 
-              source={require('../../assets/cup.svg')} 
+              source={require('../../../assets/cup.svg')} 
               style={[
                 styles.navIcon,
                 hoveredButton === 'tournament' && styles.hoveredIcon

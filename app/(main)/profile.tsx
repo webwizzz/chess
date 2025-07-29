@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import Layout from './components/Layout';
+import Layout from '../components/layout/Layout';
 
 function Profile() {
   return (
@@ -164,7 +164,7 @@ export default function ProfilePage() {
   const handleLogout = async () => {
     try {
       await AsyncStorage.removeItem("user");
-      router.push("/Login");
+      router.push("/(auth)/login");
     } catch (e) {
       console.error("Error logging out:", e);
       Alert.alert("Error", "Failed to log out.");

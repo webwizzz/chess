@@ -2,11 +2,11 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Text, View } from "react-native"; // Import Alert
 import { Socket } from "socket.io-client";
-import { getSocket, getSocketInstance } from "../utils/socketManager";
-import ChessGame from "./chessboards/classic";
-import DecayChessGame from "./chessboards/Decay";
-import SixPointerChessGame from "./chessboards/SixPointer";
-import CrazyHouseChessGame from "./chessboards/crazyHouse";
+import ClassicChess from "../(game)/variants/classic";
+import CrazyHouseChess from "../(game)/variants/crazy-house";
+import DecayChess from "../(game)/variants/decay";
+import SixPointerChess from "../(game)/variants/six-pointer";
+import { getSocket, getSocketInstance } from "../../utils/socketManager";
 
 // Re-use the GameState interface or import it if defined in a shared file
 interface GameState {
@@ -233,28 +233,28 @@ export default function MatchMaking() {
     switch (gameState.variantName) {
       case "classic":
         return (
-          <ChessGame
+          <ClassicChess
             initialGameState={gameState}
             userId={userId}
           />
         );
       case "decay":
         return (
-          <DecayChessGame
+          <DecayChess
             initialGameState={gameState}
             userId={userId}
           />
         );
       case "sixpointer":
         return (
-          <SixPointerChessGame
+          <SixPointerChess
             initialGameState={gameState}
             userId={userId}
           />
         );
       case "crazyhouse":
         return (
-          <CrazyHouseChessGame
+          <CrazyHouseChess
             initialGameState={gameState}
             userId={userId}
           />
