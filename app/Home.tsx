@@ -13,7 +13,7 @@ export default function Home() {
       <Text style={{ color: "#fff", fontSize: 32, fontWeight: "bold", marginBottom: 24 }}>Chess Game</Text>
       <TouchableOpacity
         style={{ backgroundColor: "#00A862", paddingVertical: 16, paddingHorizontal: 48, borderRadius: 30, marginBottom: 16 }}
-        onPress={() => router.push("/Signup")}
+        onPress={() => router.push("/(auth)/signup")}
       >
         <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold" }}>Start</Text>
       </TouchableOpacity>
