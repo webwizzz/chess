@@ -2,154 +2,13 @@
 
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
-import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
+import { Alert, Dimensions, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../../../utils/socketManager"
+import { crazyHouseStyles } from "../../lib/styles/components/crazyHouse"
 
 // Define types for this component
-interface Move {
-  from?: string;
-  to: string;
-  piece?: string;
-  captured?: string;
-  promotion?: string;
-  drop?: boolean;
-  id?: string;
-}
-
-interface CrazyHouseChessGameProps {
-  initialGameState: any;
-  userId: string;
-  onNavigateToMenu?: () => void;
-}
-
-interface PocketPieceStandardType {
-  type: string;
-}
-
-interface PocketPieceWithTimerType {
-  type: string;
-  timer?: number;
-  id?: string;
-  canDrop?: boolean;
-  remainingTime?: number;
-}
-
-interface availableDropPieceType {
-  type: string;
-  id: string;
-  canDrop: boolean;
-  remainingTime?: number;
-}
-
-type PocketPieceType = PocketPieceStandardType | PocketPieceWithTimerType;
-
-interface GameStateType {
-  sessionId: string
-  variantName: string
-  subvariantName?: string // "withTimer" or undefined/other for standard
-  description: string
-  players: {
-    white: any
-    black: any
-  }
-  board: {
-    fen: string
-    position: string
-    activeColor: "white" | "black"
-    castlingRights: string
-    enPassantSquare: string
-    halfmoveClock: number
-    fullmoveNumber: number
-    whiteTime: number
-    blackTime: number
-    turnStartTimestamp: number
-    lastMoveTimestamp: number
-    moveHistory: { from: string; to: string; [key: string]: any }[]
-    pocketedPieces: {
-      white: PocketPieceType[]
-      black: PocketPieceType[]
-    }
-    availableDropPieces?: {
-      white: availableDropPieceType[]
-      black: availableDropPieceType[]
-    }
-    // Backend sends this as a plain object, frontend converts to Map for internal use
-    dropTimers: {
-      white: Record<string, number> | Map<string, number>
-      black: Record<string, number> | Map<string, number>
-    }
-    frozenPieces: {
-      white: PocketPieceWithTimerType[] // These are pieces that have expired and been removed from the pocket
-      black: PocketPieceWithTimerType[]
-    }
-    gameStarted: boolean
-    firstMoveTimestamp: number | null
-    gameEnded: boolean
-    endReason: string | null
-    winner: string | null
-    endTimestamp: number | null
-  }
-  timeControl: {
-    type: string
-    baseTime: number
-    increment: number
-    timers: {
-      white: number
-      black: number
-    }
-    flagged: {
-      white: boolean
-      black: boolean
-    }
-    timeSpent?: { white: any; black: any }
-  }
-  status: string
-  result: string
-  resultReason: string | null
-  winner: string | null
-  moves: any[]
-  moveCount: number
-  lastMove: any
-  gameState: {
-    // This is the nested gameState object from the backend's result
-    check?: boolean
-    checkmate?: boolean
-    stalemate?: boolean
-    insufficientMaterial?: boolean
-    threefoldRepetition?: boolean
-    fiftyMoveRule?: boolean
-    gameEnded?: boolean
-    result?: string
-    winner?: string | null
-    endReason?: string | null
-    pocketedPieces?: {
-      white: PocketPieceType[]
-      black: PocketPieceType[]
-    }
-    dropTimers?: {
-      // This is where the correct dropTimers are
-      white: Record<string, number>
-      black: Record<string, number>
-    }
-    frozenPieces?: {
-      // This is where the derived frozenPieces (in pocket but not droppable) are
-      white: PocketPieceWithTimerType[]
-      black: PocketPieceWithTimerType[]
-    }
-  }
-  userColor: {
-    [key: string]: "white" | "black"
-  }
-  positionHistory: string[]
-  createdAt: number
-  lastActivity: number
-  startedAt: number
-  endedAt: number | null
-  rules?: any
-  metadata: any
-  timers?: any
-}
+import { GameStateType, Move, CrazyHouseChessGameProps, PocketPieceWithTimerType, availableDropPieceType } from "@/app/lib/types/crazyhouse"
 
 const PIECE_SYMBOLS = {
   r: "♜",
@@ -244,14 +103,14 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
       if (pocket.length > 0) {
         const firstPiece = pocket[0]
-        let expirationTimestamp = dropTimersMap.get(firstPiece.id)
+        let expirationTimestamp = firstPiece.id ? dropTimersMap.get(firstPiece.id) : undefined
         // If timer is not in the active map, check if it's paused on the piece itself
         if (
           !expirationTimestamp &&
           (firstPiece as availableDropPieceType).timerPaused &&
           (firstPiece as availableDropPieceType).remainingTime !== undefined
         ) {
-          expirationTimestamp = Date.now() + firstPiece && (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+          expirationTimestamp = Date.now() + ((firstPiece as availableDropPieceType).remainingTime ?? 0) // Calculate effective expiration
         }
 
         if (expirationTimestamp) {
@@ -328,7 +187,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
               if (currentActivePlayerPocket.length > 0) {
                 const firstPiece = currentActivePlayerPocket[0]
-                let expirationTimestamp = currentActivePlayerDropTimersMap.get(firstPiece.id)
+                let expirationTimestamp = firstPiece.id ? currentActivePlayerDropTimersMap.get(firstPiece.id) : undefined
 
                 // If timer is not in the active map, check if it's paused on the piece itself
                 if (
@@ -336,7 +195,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                   (firstPiece as availableDropPieceType).timerPaused &&
                   (firstPiece as availableDropPieceType).remainingTime !== undefined
                 ) {
-                  expirationTimestamp = now + firstPiece && (firstPiece as availableDropPieceType).remainingTime
+                  expirationTimestamp = firstPiece && (now + ((firstPiece as availableDropPieceType).remainingTime ?? 0))
                 }
 
                 if (expirationTimestamp) {
@@ -345,7 +204,7 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                 }
               }
             }
-            return newDropTimers
+            return { ...prevDropTimers, ...newDropTimers }
           })
         } else {
           setLocalDropTimers({ white: null, black: null })
@@ -414,20 +273,22 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           const dropTimersMap = getDropTimersMap(newState.board.dropTimers, activeColor)
           const now = Date.now()
           setLocalDropTimers((prev) => {
-            const newDropTimers = { white: null, black: null } // Reset both
+            const newDropTimers: { white: number | null; black: number | null } = { white: null, black: null } // Reset both
             if (pocket.length > 0) {
               const firstPiece = pocket[0]
-              let expirationTimestamp = dropTimersMap.get(firstPiece.id)
+              let expirationTimestamp = firstPiece.id ? dropTimersMap.get(firstPiece.id) : undefined
               // If timer is not in the active map, check if it's paused on the piece itself
               if (
                 !expirationTimestamp &&
                 (firstPiece as availableDropPieceType).timerPaused &&
                 (firstPiece as availableDropPieceType).remainingTime !== undefined
               ) {
-                expirationTimestamp = now + firstPiece && (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+                expirationTimestamp = now + ((firstPiece as availableDropPieceType).remainingTime ?? 0) // Calculate effective expiration
               }
-              if (expirationTimestamp) {
-                newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
+              if (expirationTimestamp !== undefined && expirationTimestamp !== null) {
+                newDropTimers[activeColor as "white" | "black"] = Math.max(0, expirationTimestamp - now)
+              } else {
+                newDropTimers[activeColor as "white" | "black"] = null
               }
             }
             return newDropTimers
@@ -502,20 +363,22 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
           const dropTimersMap = getDropTimersMap(newState.board.dropTimers, activeColor)
           const now = Date.now()
           setLocalDropTimers((prev) => {
-            const newDropTimers = { white: null, black: null } // Reset both
+            const newDropTimers: { white: number | null; black: number | null } = { white: null, black: null } // Reset both
             if (pocket.length > 0) {
               const firstPiece = pocket[0]
-              let expirationTimestamp = dropTimersMap.get(firstPiece.id)
+              let expirationTimestamp = firstPiece.id ? dropTimersMap.get(firstPiece.id) : undefined
               // If timer is not in the active map, check if it's paused on the piece itself
               if (
                 !expirationTimestamp &&
                 (firstPiece as availableDropPieceType).timerPaused &&
                 (firstPiece as availableDropPieceType).remainingTime !== undefined
               ) {
-                expirationTimestamp = now + firstPiece && (firstPiece as availableDropPieceType).remainingTime // Calculate effective expiration
+                expirationTimestamp = now + ((firstPiece as availableDropPieceType).remainingTime ?? 0) // Calculate effective expiration
               }
-              if (expirationTimestamp) {
-                newDropTimers[activeColor] = Math.max(0, expirationTimestamp - now)
+              if (expirationTimestamp !== undefined && expirationTimestamp !== null) {
+                newDropTimers[activeColor as "white" | "black"] = Math.max(0, expirationTimestamp - now)
+              } else {
+                newDropTimers[activeColor as "white" | "black"] = null
               }
             }
             return newDropTimers
@@ -743,28 +606,28 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
       const dropTimersMap = getDropTimersMap(gameState.board.dropTimers, color)
 
       return (
-        <View style={styles.pocketPanel}>
-          <Text style={styles.pocketLabel}>{color === "white" ? "White Pocket" : "Black Pocket"}</Text>
-          <View style={styles.pocketSectionsContainer}>
+        <View style={crazyHouseStyles.pocketPanel}>
+          <Text style={crazyHouseStyles.pocketLabel}>{color === "white" ? "White Pocket" : "Black Pocket"}</Text>
+          <View style={crazyHouseStyles.pocketSectionsContainer}>
             {/* All pocket pieces section */}
-            <View style={styles.droppablePieceSection}>
+            <View style={crazyHouseStyles.droppablePieceSection}>
               {pocket.length > 0 ? (
                 pocket.map((piece) => {
                   const isDroppable = availableDropPieces.some(p => p.id === piece.id && p.canDrop)
-                  const expirationTimestamp = dropTimersMap.get(piece.id)
+                  const expirationTimestamp = piece.id ? dropTimersMap.get(piece.id) : undefined
                   const remaining = expirationTimestamp ? expirationTimestamp - Date.now() : null
                   
                   return (
                     <TouchableOpacity
                       key={piece.id}
                       style={[
-                        styles.pocketPiece,
+                        crazyHouseStyles.pocketPiece,
                         (selectedPocketPiece as any)?.id === piece.id && selectedPocket === color
-                          ? styles.selectedPocketPiece
+                          ? crazyHouseStyles.selectedPocketPiece
                           : null,
-                        !isDroppable && styles.nonDroppablePiece,
+                        !isDroppable && crazyHouseStyles.nonDroppablePiece,
                         // Add warning styles for urgency
-                        remaining !== null && remaining <= 5000 ? styles.pocketPieceWarning : null,
+                        remaining !== null && remaining <= 5000 ? crazyHouseStyles.pocketPieceWarning : null,
                       ]}
                       onPress={() => {
                         if (isDroppable && isMyTurnForPocket) {
@@ -774,27 +637,27 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                       }}
                       disabled={!isMyTurnForPocket || !isDroppable}
                     >
-                      <Text style={styles.pieceText}>
+                      <Text style={crazyHouseStyles.pieceText}>
                         {PIECE_SYMBOLS[piece.type as keyof typeof PIECE_SYMBOLS]}
                       </Text>
                       {remaining !== null && (
-                        <View style={styles.dropTimerOverlay}>
-                          <Text style={styles.dropTimerValueText}>
+                        <View style={crazyHouseStyles.dropTimerOverlay}>
+                          <Text style={crazyHouseStyles.dropTimerValueText}>
                             {formatDropTime(Math.max(0, remaining))}
                           </Text>
                         </View>
                       )}
                       {!isDroppable && (
-                        <View style={styles.frozenSignOverlay}>
-                          <Text style={styles.frozenSignText}>❄️</Text>
+                        <View style={crazyHouseStyles.frozenSignOverlay}>
+                          <Text style={crazyHouseStyles.frozenSignText}>❄️</Text>
                         </View>
                       )}
                     </TouchableOpacity>
                   )
                 })
               ) : (
-                <View style={styles.emptyPocketSection}>
-                  <Text style={styles.noPieceText}>No pieces in pocket</Text>
+                <View style={crazyHouseStyles.emptyPocketSection}>
+                  <Text style={crazyHouseStyles.noPieceText}>No pieces in pocket</Text>
                 </View>
               )}
             </View>
@@ -806,20 +669,29 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
       const pocket = gameState.board.pocketedPieces[color] || []
       const pieceCounts: { [key: string]: number } = {}
       pocket.forEach((piece) => {
-        const pieceType = (piece as PocketPieceStandardType).type || (piece as string)
-        pieceCounts[pieceType] = (pieceCounts[pieceType] || 0) + 1
+        let pieceType: string
+        if (typeof piece === "string") {
+          pieceType = piece
+        } else if ("type" in piece && typeof piece.type === "string") {
+          pieceType = piece.type
+        } else {
+          pieceType = ""
+        }
+        if (pieceType) {
+          pieceCounts[pieceType] = (pieceCounts[pieceType] || 0) + 1
+        }
       })
 
       return (
-        <View style={styles.pocketPanel}>
-          <Text style={styles.pocketLabel}>{color === "white" ? "White Pocket" : "Black Pocket"}</Text>
-          <View style={styles.pocketPieces}>
+        <View style={crazyHouseStyles.pocketPanel}>
+          <Text style={crazyHouseStyles.pocketLabel}>{color === "white" ? "White Pocket" : "Black Pocket"}</Text>
+          <View style={crazyHouseStyles.pocketPieces}>
             {Object.entries(pieceCounts).map(([pieceType, count]) => (
               <TouchableOpacity
                 key={pieceType}
                 style={[
-                  styles.pocketPiece,
-                  selectedPocketPiece === pieceType && selectedPocket === color ? styles.selectedPocketPiece : null,
+                  crazyHouseStyles.pocketPiece,
+                  selectedPocketPiece === pieceType && selectedPocket === color ? crazyHouseStyles.selectedPocketPiece : null,
                 ]}
                 onPress={() => {
                   setSelectedPocketPiece(pieceType)
@@ -828,9 +700,9 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                 disabled={!isMyTurnForPocket}
               >
 
-                <Text style={styles.pieceText}>{PIECE_SYMBOLS[pieceType as keyof typeof PIECE_SYMBOLS]}</Text>
+                <Text style={crazyHouseStyles.pieceText}>{PIECE_SYMBOLS[pieceType as keyof typeof PIECE_SYMBOLS]}</Text>
 
-                {count > 1 && <Text style={styles.pocketCount}>x{count}</Text>}
+                {count > 1 && <Text style={crazyHouseStyles.pocketCount}>x{count}</Text>}
               </TouchableOpacity>
             ))}
           </View>
@@ -851,16 +723,16 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
       <TouchableOpacity
         key={square}
         style={[
-          styles.square,
+          crazyHouseStyles.square,
           { width: squareSize, height: squareSize, backgroundColor: isLight ? "#F0D9B5" : "#769656" },
-          isSelected && styles.selectedSquare,
-          isPossibleMove && styles.possibleMoveSquare,
+          isSelected && crazyHouseStyles.selectedSquare,
+          isPossibleMove && crazyHouseStyles.possibleMoveSquare,
         ]}
         onPress={() => handleSquarePress(square)}
       >
-        {piece && <Text style={styles.pieceText}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>}
-        {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
-        {isPossibleMove && piece && <View style={styles.captureIndicator} />}
+        {piece && <Text style={crazyHouseStyles.pieceText}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>}
+        {isPossibleMove && !piece && <View style={crazyHouseStyles.possibleMoveDot} />}
+        {isPossibleMove && piece && <View style={crazyHouseStyles.captureIndicator} />}
       </TouchableOpacity>
     )
   }
@@ -870,10 +742,10 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
-      <View style={styles.boardContainer}>
-        <View style={styles.board}>
+      <View style={crazyHouseStyles.boardContainer}>
+        <View style={crazyHouseStyles.board}>
           {ranks.map((rank) => (
-            <View key={rank} style={styles.row}>
+            <View key={rank} style={crazyHouseStyles.row}>
               {files.map((file) => renderSquare(file, rank))}
             </View>
           ))}
@@ -892,15 +764,15 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     const isMe = playerColor === color
 
     return (
-      <View style={[styles.playerInfoBlock, isTop ? styles.topPlayerBlock : styles.bottomPlayerBlock]}>
-        <View style={styles.playerDetails}>
-          <Text style={styles.playerName}>
-            {player.username} {isMe && <Text style={styles.youIndicator}>YOU</Text>}
+      <View style={[crazyHouseStyles.playerInfoBlock, isTop ? crazyHouseStyles.topPlayerBlock : crazyHouseStyles.bottomPlayerBlock]}>
+        <View style={crazyHouseStyles.playerDetails}>
+          <Text style={crazyHouseStyles.playerName}>
+            {player.username} {isMe && <Text style={crazyHouseStyles.youIndicator}>YOU</Text>}
           </Text>
-          <Text style={styles.playerRating}>({player.rating})</Text>
+          <Text style={crazyHouseStyles.playerRating}>({player.rating})</Text>
         </View>
-        <View style={[styles.timerContainer, isActivePlayer && styles.activeTimer]}>
-          <Text style={styles.timer}>{formatTime(timer)}</Text>
+        <View style={[crazyHouseStyles.timerContainer, isActivePlayer && crazyHouseStyles.activeTimer]}>
+          <Text style={crazyHouseStyles.timer}>{formatTime(timer)}</Text>
         </View>
       </View>
     )
@@ -914,19 +786,19 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
     return (
       <Modal visible={showMoveHistory} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.moveHistoryModal}>
-            <View style={styles.moveHistoryHeader}>
-              <Text style={styles.moveHistoryTitle}>Moves</Text>
-              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>✕</Text>
+        <View style={crazyHouseStyles.modalOverlay}>
+          <View style={crazyHouseStyles.moveHistoryModal}>
+            <View style={crazyHouseStyles.moveHistoryHeader}>
+              <Text style={crazyHouseStyles.moveHistoryTitle}>Moves</Text>
+              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={crazyHouseStyles.closeButton}>
+                <Text style={crazyHouseStyles.closeButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.moveHistoryScroll}>
+            <ScrollView style={crazyHouseStyles.moveHistoryScroll}>
               {moves.map((move, idx) => (
-                <View key={idx} style={styles.moveRow}>
-                  <Text style={styles.moveNumber}>{idx + 1}.</Text>
-                  <Text style={styles.moveText}>{move.san || `${move.from || ""}-${move.to || ""}`}</Text>
+                <View key={idx} style={crazyHouseStyles.moveRow}>
+                  <Text style={crazyHouseStyles.moveNumber}>{idx + 1}.</Text>
+                  <Text style={crazyHouseStyles.moveText}>{move.san || `${move.from || ""}-${move.to || ""}`}</Text>
                 </View>
               ))}
             </ScrollView>
@@ -942,13 +814,13 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
     return (
       <Modal visible={promotionModal.visible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.promotionModal}>
-            <Text style={styles.promotionTitle}>Choose Promotion Piece</Text>
-            <View style={styles.promotionOptions}>
+        <View style={crazyHouseStyles.modalOverlay}>
+          <View style={crazyHouseStyles.promotionModal}>
+            <Text style={crazyHouseStyles.promotionTitle}>Choose Promotion Piece</Text>
+            <View style={crazyHouseStyles.promotionOptions}>
               {promotionModal.options.map((p) => (
-                <TouchableOpacity key={p} style={styles.promotionOption} onPress={() => handlePromotionSelect(p)}>
-                  <Text style={styles.promotionPiece}>
+                <TouchableOpacity key={p} style={crazyHouseStyles.promotionOption} onPress={() => handlePromotionSelect(p)}>
+                  <Text style={crazyHouseStyles.promotionPiece}>
                     {
                       PIECE_SYMBOLS[
                         (playerColor === "white" ? p.toUpperCase() : p.toLowerCase()) as keyof typeof PIECE_SYMBOLS
@@ -958,8 +830,8 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity onPress={() => setPromotionModal(null)} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+            <TouchableOpacity onPress={() => setPromotionModal(null)} style={crazyHouseStyles.cancelButton}>
+              <Text style={crazyHouseStyles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -973,12 +845,12 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
 
     return (
       <Modal visible={showGameEndModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.gameEndModal}>
-            <Text style={styles.gameEndTitle}>
+        <View style={crazyHouseStyles.modalOverlay}>
+          <View style={crazyHouseStyles.gameEndModal}>
+            <Text style={crazyHouseStyles.gameEndTitle}>
               {isWinner === true ? "VICTORY!" : isWinner === false ? "DEFEAT" : "GAME OVER"}
             </Text>
-            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
+            <Text style={crazyHouseStyles.gameEndMessage}>{gameEndMessage}</Text>
           </View>
         </View>
       </Modal>
@@ -993,39 +865,39 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
   const opponentColor = playerColor === "white" ? "black" : "white"
 
   return (
-    <View style={styles.container}>
+    <View style={crazyHouseStyles.container}>
       {renderPlayerInfo(opponentColor, true)}
       {renderPocketPanel(opponentColor)}
       {renderBoard()}
       {renderPocketPanel(playerColor)}
       {renderPlayerInfo(playerColor, false)}
 
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
-          <Text style={styles.bottomBarIcon}>≡</Text>
-          <Text style={styles.bottomBarLabel}>Moves</Text>
+      <View style={crazyHouseStyles.bottomBar}>
+        <TouchableOpacity style={crazyHouseStyles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
+          <Text style={crazyHouseStyles.bottomBarIcon}>≡</Text>
+          <Text style={crazyHouseStyles.bottomBarLabel}>Moves</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={handleFlipBoard}>
-          <Text style={styles.bottomBarIcon}>⟲</Text>
-          <Text style={styles.bottomBarLabel}>Flip</Text>
+        <TouchableOpacity style={crazyHouseStyles.bottomBarButton} onPress={handleFlipBoard}>
+          <Text style={crazyHouseStyles.bottomBarIcon}>⟲</Text>
+          <Text style={crazyHouseStyles.bottomBarLabel}>Flip</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={crazyHouseStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") socket.emit("game:resign")
           }}
         >
-          <Text style={styles.bottomBarIcon}>✕</Text>
-          <Text style={styles.bottomBarLabel}>Resign</Text>
+          <Text style={crazyHouseStyles.bottomBarIcon}>✕</Text>
+          <Text style={crazyHouseStyles.bottomBarLabel}>Resign</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={crazyHouseStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") socket.emit("game:offerDraw")
           }}
         >
-          <Text style={styles.bottomBarIcon}>½</Text>
-          <Text style={styles.bottomBarLabel}>Draw</Text>
+          <Text style={crazyHouseStyles.bottomBarIcon}>½</Text>
+          <Text style={crazyHouseStyles.bottomBarLabel}>Draw</Text>
         </TouchableOpacity>
       </View>
 
@@ -1035,286 +907,3 @@ export default function CrazyHouseChessGame({ initialGameState, userId, onNaviga
     </View>
   )
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#222", alignItems: "center" },
-  boardContainer: { alignItems: "center", justifyContent: "center" },
-  board: {},
-  row: { flexDirection: "row" },
-  square: {
-    justifyContent: "center",
-    alignItems: "center",
-    position: "relative",
-    borderWidth: 1,
-    borderColor: "#444",
-  },
-  selectedSquare: { backgroundColor: "#f7ec74" },
-  possibleMoveSquare: { backgroundColor: "rgba(255,255,0,0.3)" },
-  pieceText: { fontSize: 28, color: "#fff", fontWeight: "bold" },
-  possibleMoveDot: {
-    position: "absolute",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "rgba(0,0,0,0.3)",
-    opacity: 0.8,
-  },
-  captureIndicator: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 16,
-    borderTopWidth: 16,
-    borderLeftColor: "transparent",
-    borderTopColor: "rgba(255,0,0,0.3)",
-  },
-  playerInfoBlock: {
-    width: "100%",
-    backgroundColor: "#222",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#333",
-  },
-  topPlayerBlock: { paddingTop: 20 },
-  bottomPlayerBlock: { borderTopWidth: 1, borderBottomWidth: 0, borderTopColor: "#333", paddingBottom: 20 },
-  playerDetails: { flex: 1 },
-  playerName: { color: "#fff", fontSize: 18, fontWeight: "500" },
-  youIndicator: { color: "#90EE90", fontSize: 14, fontWeight: "bold", marginLeft: 5 },
-  playerRating: { color: "#999", fontSize: 14 },
-  timerContainer: {
-    backgroundColor: "#1a1a1a",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    minWidth: 70,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  activeTimer: { borderColor: "#90EE90" },
-  timer: { color: "#fff", fontWeight: "bold", fontFamily: "monospace", fontSize: 20 },
-  // General pocket panel styles
-  pocketPanel: {
-    flexDirection: "column", // Changed to column to stack droppable and frozen sections
-    alignItems: "center",
-    marginVertical: 8,
-    width: "90%", // Give it some width
-  },
-  pocketLabel: { color: "#fff", marginBottom: 8, fontSize: 16, fontWeight: "bold" },
-  // New styles for organizing withTimer pockets
-  pocketSectionsContainer: {
-    flexDirection: "column",
-    width: "100%",
-    alignItems: "center",
-  },
-  droppablePieceSection: {
-    flexDirection: "row", // Pieces in a row
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 8,
-    minHeight: 40, // Ensure consistent height even if no piece
-  },
-  frozenPiecesSection: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center", // Center the frozen pieces
-    flexWrap: "wrap", // Allow pieces to wrap if too many
-    borderTopWidth: 1,
-    borderTopColor: "#333",
-    paddingTop: 8,
-  },
-  frozenLabel: {
-    color: "#ccc",
-    marginRight: 8,
-    fontSize: 14,
-  },
-  frozenPiecesContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap", // Allow pieces to wrap
-    justifyContent: "center",
-  },
-  noPieceText: {
-    color: "#999",
-    fontSize: 14,
-    fontStyle: "italic",
-    paddingVertical: 8,
-  },
-  // Existing pocket piece styles (re-applied or adjusted)
-  pocketPieces: {
-    flexDirection: "row",
-    flexWrap: "wrap", // For standard, allow wrapping
-    justifyContent: "center",
-  },
-  pocketPiece: {
-    backgroundColor: "#333",
-    borderRadius: 4,
-    padding: 8,
-    marginHorizontal: 2,
-    flexDirection: "column", // Allow text and piece to stack
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative", // Added for absolute positioning of timer overlay
-  },
-  selectedPocketPiece: { backgroundColor: "#60a5fa" },
-  pocketCount: { color: "#a1a1aa", fontSize: 12, marginLeft: 2 },
-  // Renamed and adjusted for the timer clock overlay
-  dropTimerOverlay: {
-    position: 'absolute',
-    top: -8,
-    left: '50%',
-    transform: [{ translateX: -15 }],
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-  },
-  dropTimerValueText: {
-    // New name for the timer text style
-    color: "#fff",
-    fontSize: 10, // Smaller font for clock
-    fontFamily: "monospace",
-  },
-  frozenPocketPiece: {
-    backgroundColor: "#444", // Slightly different background
-    borderRadius: 4,
-    padding: 8,
-    marginHorizontal: 2,
-    opacity: 1, // Full opacity but distinct color
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative", // Added for absolute positioning of frozen sign
-  },
-  // New styles for the frozen sign overlay
-  frozenSignOverlay: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 4,
-    width: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  frozenSignText: {
-    fontSize: 10,
-  },
-  bottomBar: {
-    flexDirection: "row",
-    backgroundColor: "#1a1a1a",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    justifyContent: "space-around",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#333",
-    width: "100%",
-  },
-  bottomBarButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    minWidth: 60,
-  },
-  bottomBarIcon: { fontSize: 24, marginBottom: 4, color: "#999", fontWeight: "bold" },
-  bottomBarLabel: { color: "#fff", fontSize: 12, fontWeight: "500" },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 16,
-  },
-  moveHistoryModal: {
-    backgroundColor: "#222",
-    borderRadius: 12,
-    width: "90%",
-    maxWidth: 400,
-    maxHeight: "70%",
-    borderWidth: 1,
-    borderColor: "#555",
-  },
-  moveHistoryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#555",
-  },
-  moveHistoryTitle: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  closeButton: { padding: 8 },
-  closeButtonText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  moveHistoryScroll: { flex: 1, padding: 16 },
-  moveRow: { flexDirection: "row", marginBottom: 8, alignItems: "center" },
-  moveNumber: { color: "#999", fontSize: 14, width: 30, fontWeight: "bold" },
-  moveText: { color: "#fff", fontSize: 14, width: 60, marginHorizontal: 8 },
-  gameEndModal: {
-    backgroundColor: "#222",
-    borderRadius: 16,
-    padding: 24,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-    maxWidth: "90%",
-  },
-  gameEndTitle: { fontSize: 24, fontWeight: "bold", textAlign: "center", marginBottom: 16, color: "#fff" },
-  gameEndMessage: { fontSize: 16, textAlign: "center", marginBottom: 20, color: "#fff", lineHeight: 22 },
-  promotionModal: {
-    backgroundColor: "#222",
-    borderRadius: 12,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-  },
-  promotionTitle: { color: "#fff", fontSize: 18, fontWeight: "bold", marginBottom: 20, textAlign: "center" },
-  promotionOptions: { flexDirection: "row", justifyContent: "center", marginBottom: 20, flexWrap: "wrap" },
-  promotionOption: {
-    margin: 8,
-    padding: 12,
-    backgroundColor: "#F0D9B5",
-    borderRadius: 8,
-    minWidth: 50,
-    minHeight: 50,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  promotionPiece: { fontSize: 28, textAlign: "center", color: "#000" },
-  cancelButton: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: "#666", borderRadius: 8 },
-  cancelButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
-  // New style for non-droppable pieces
-  nonDroppablePiece: {
-    opacity: 0.6,
-    backgroundColor: '#444',
-  },
-  // New style for empty pocket section
-  emptyPocketSection: {
-    minHeight: 60,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  // Add new styles for warning states
-  dropTimerWarning: {
-    backgroundColor: 'rgba(255,59,48,0.8)', // Red background for urgency
-  },
-  
-  dropTimerValueWarning: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  
-  pocketPieceWarning: {
-    borderWidth: 2,
-    borderColor: '#ff3b30',
-  },
-})

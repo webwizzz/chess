@@ -2,116 +2,12 @@
 
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
-import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
+import { Alert, Dimensions, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
 import { getSocketInstance } from "../../../utils/socketManager"
 import { getPieceComponent } from "../../components/game/chessPieces"
-
-// Types
-interface Player {
-  userId: string
-  username: string
-  rating: number
-  avatar: string | null
-  title: string | null
-}
-
-interface GameState {
-  sessionId: string
-  variantName: string
-  subvariantName?: string
-  description: string
-  players: {
-    white: Player
-    black: Player
-  }
-  board: {
-    fen: string
-    position: string
-    activeColor: "white" | "black"
-    castlingRights: string
-    enPassantSquare: string
-    halfmoveClock: number
-    fullmoveNumber: number
-    whiteTime?: number
-    blackTime?: number
-    turnStartTimestamp?: number
-    lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
-    repetitionMap?: any
-    gameStarted?: boolean
-    firstMoveTimestamp?: number
-    capturedPieces?: {
-      white: string[]
-      black: string[]
-    }
-  }
-  timeControl: {
-    type: string
-    baseTime: number
-    increment: number
-    timers: {
-      white: number
-      black: number
-    }
-    flagged: {
-      white: boolean
-      black: boolean
-    }
-    timeSpent?: { white: any; black: any }
-  }
-  status: string
-  result: string
-  resultReason?: string | null
-  winner?: string | null
-  moves: any[]
-  moveCount: number
-  lastMove: any
-  gameState: {
-    valid?: boolean
-    move?: any
-    state?: any
-    result?: string
-    check?: boolean
-    checkmate?: boolean
-    stalemate?: boolean
-    insufficientMaterial?: boolean
-    threefoldRepetition?: boolean
-    fiftyMoveRule?: boolean
-    canCastleKingside?: { white?: boolean; black?: boolean }
-    canCastleQueenside?: { white?: boolean; black?: boolean }
-    promotionAvailable?: boolean
-    lastMove?: any
-    winner?: string | null
-    drawReason?: string | null
-    gameEnded?: boolean
-    endReason?: string | null
-    endTimestamp?: number
-  }
-  userColor: {
-    [key: string]: "white" | "black"
-  }
-  positionHistory?: string[]
-  createdAt?: number
-  lastActivity?: number
-  startedAt?: number
-  endedAt?: number | null
-  rules?: any
-  metadata?: any
-  timers?: any
-}
-
-interface Move {
-  from: string
-  to: string
-  promotion?: string
-}
-
-interface ChessGameProps {
-  initialGameState: GameState
-  userId: string
-  onNavigateToMenu?: () => void
-}
+import { chessGameStyles } from "../../lib/styles/components/chessGame"
+import { Move, GameState, ChessGameProps} from "../../lib/types/classic"
 
 const PIECE_VALUES = {
   p: 1,
@@ -921,13 +817,13 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     })
 
     return (
-      <View style={styles.capturedPieces}>
+      <View style={chessGameStyles.capturedPieces}>
         {Object.entries(pieceCounts).map(([piece, count]) => (
-          <View key={piece} style={styles.capturedPieceGroup}>
+          <View key={piece} style={chessGameStyles.capturedPieceGroup}>
             <View style={{ width: fontSizes.coordinates, height: fontSizes.coordinates }}>
               {getPieceComponent(piece, fontSizes.coordinates)}
             </View>
-            {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
+            {count > 1 && <Text style={chessGameStyles.capturedCount}>{count}</Text>}
           </View>
         ))}
       </View>
@@ -963,22 +859,22 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       <TouchableOpacity
         key={square}
         style={[
-          styles.square,
+          chessGameStyles.square,
           {
             width: squareSize,
             height: squareSize,
             backgroundColor: isLight ? "#F0D9B5" : "#769656", // Exact Chess.com colors
           },
-          isLastMove && styles.lastMoveSquare,
-          isSelected && styles.selectedSquare,
+          isLastMove && chessGameStyles.lastMoveSquare,
+          isSelected && chessGameStyles.selectedSquare,
         ]}
         onPress={() => handleSquarePress(square)}
       >
         {piece && (
           getPieceComponent(piece, squareSize * 0.8)
         )}
-        {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
-        {isPossibleMove && isCapture && <View style={styles.captureDot} />}
+        {isPossibleMove && !piece && <View style={chessGameStyles.possibleMoveDot} />}
+        {isPossibleMove && isCapture && <View style={chessGameStyles.captureDot} />}
       </TouchableOpacity>
     )
   }
@@ -990,19 +886,19 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     return (
       <>
         {/* File coordinates (a-h) at bottom */}
-        <View style={styles.fileCoordinates}>
+        <View style={chessGameStyles.fileCoordinates}>
           {files.map((file, index) => (
             <View key={file} style={{ width: squareSize, alignItems: "center" }}>
-              <Text style={styles.coordinateText}>{file}</Text>
+              <Text style={chessGameStyles.coordinateText}>{file}</Text>
             </View>
           ))}
         </View>
 
         {/* Rank coordinates (1-8) on right side */}
-        <View style={styles.rankCoordinates}>
+        <View style={chessGameStyles.rankCoordinates}>
           {ranks.map((rank, index) => (
             <View key={rank} style={{ height: squareSize, justifyContent: "center" }}>
-              <Text style={styles.coordinateText}>{rank}</Text>
+              <Text style={chessGameStyles.coordinateText}>{rank}</Text>
             </View>
           ))}
         </View>
@@ -1015,11 +911,11 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
-      <View style={styles.boardContainer}>
-        <View style={styles.boardWrapper}>
+      <View style={chessGameStyles.boardContainer}>
+        <View style={chessGameStyles.boardWrapper}>
           <View
             style={[
-              styles.board,
+              chessGameStyles.board,
               {
                 width: boardSize,
                 height: boardSize,
@@ -1027,7 +923,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
             ]}
           >
             {ranks.map((rank) => (
-              <View key={rank} style={styles.row}>
+              <View key={rank} style={chessGameStyles.row}>
                 {files.map((file) => renderSquare(file, rank))}
               </View>
             ))}
@@ -1047,21 +943,21 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     const isActivePlayer = gameState.board.activeColor === color
 
     return (
-      <View style={[styles.playerContainer, isTop ? styles.topPlayer : styles.bottomPlayer]}>
-        <View style={styles.playerInfo}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
+      <View style={[chessGameStyles.playerContainer, isTop ? chessGameStyles.topPlayer : chessGameStyles.bottomPlayer]}>
+        <View style={chessGameStyles.playerInfo}>
+          <View style={chessGameStyles.avatar}>
+            <Text style={chessGameStyles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
           </View>
-          <View style={styles.playerDetails}>
-            <View style={styles.playerNameRow}>
-              <Text style={styles.playerName}>{player.username}</Text>
-              <Text style={styles.playerRating}>({player.rating})</Text>
+          <View style={chessGameStyles.playerDetails}>
+            <View style={chessGameStyles.playerNameRow}>
+              <Text style={chessGameStyles.playerName}>{player.username}</Text>
+              <Text style={chessGameStyles.playerRating}>({player.rating})</Text>
             </View>
             {renderCapturedPieces(color)}
           </View>
         </View>
-        <View style={[styles.timerContainer, isActivePlayer && styles.activeTimer]}>
-          <Text style={[styles.timer, { fontSize: fontSizes.timer }]}>{formatTime(timer)}</Text>
+        <View style={[chessGameStyles.timerContainer, isActivePlayer && chessGameStyles.activeTimer]}>
+          <Text style={[chessGameStyles.timer, { fontSize: fontSizes.timer }]}>{formatTime(timer)}</Text>
         </View>
       </View>
     )
@@ -1082,20 +978,20 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
     return (
       <Modal visible={showMoveHistory} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.moveHistoryModal}>
-            <View style={styles.moveHistoryHeader}>
-              <Text style={styles.moveHistoryTitle}>📜 Move History</Text>
-              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>✕</Text>
+        <View style={chessGameStyles.modalOverlay}>
+          <View style={chessGameStyles.moveHistoryModal}>
+            <View style={chessGameStyles.moveHistoryHeader}>
+              <Text style={chessGameStyles.moveHistoryTitle}>📜 Move History</Text>
+              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={chessGameStyles.closeButton}>
+                <Text style={chessGameStyles.closeButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.moveHistoryScroll}>
+            <ScrollView style={chessGameStyles.moveHistoryScroll}>
               {movePairs.map((pair, index) => (
-                <View key={index} style={styles.moveRow}>
-                  <Text style={styles.moveNumber}>{pair.moveNumber}.</Text>
-                  <Text style={styles.moveText}>{pair.white}</Text>
-                  <Text style={styles.moveText}>{pair.black}</Text>
+                <View key={index} style={chessGameStyles.moveRow}>
+                  <Text style={chessGameStyles.moveNumber}>{pair.moveNumber}.</Text>
+                  <Text style={chessGameStyles.moveText}>{pair.white}</Text>
+                  <Text style={chessGameStyles.moveText}>{pair.black}</Text>
                 </View>
               ))}
             </ScrollView>
@@ -1113,7 +1009,7 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
   const bottomPlayerColor = boardFlipped ? (playerColor === "white" ? "black" : "white") : playerColor
 
   return (
-    <View style={styles.container}>
+    <View style={chessGameStyles.container}>
       {/* Top Player */}
       {renderPlayerInfo(topPlayerColor, true)}
 
@@ -1124,39 +1020,39 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
       {renderPlayerInfo(bottomPlayerColor, false)}
 
       {/* Bottom Control Bar */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
-          <Text style={styles.bottomBarIcon}>≡</Text>
-          <Text style={styles.bottomBarLabel}>Moves</Text>
+      <View style={chessGameStyles.bottomBar}>
+        <TouchableOpacity style={chessGameStyles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
+          <Text style={chessGameStyles.bottomBarIcon}>≡</Text>
+          <Text style={chessGameStyles.bottomBarLabel}>Moves</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.bottomBarButton} onPress={handleFlipBoard}>
-          <Text style={styles.bottomBarIcon}>⟲</Text>
-          <Text style={styles.bottomBarLabel}>Flip</Text>
+        <TouchableOpacity style={chessGameStyles.bottomBarButton} onPress={handleFlipBoard}>
+          <Text style={chessGameStyles.bottomBarIcon}>⟲</Text>
+          <Text style={chessGameStyles.bottomBarLabel}>Flip</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={chessGameStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") {
               socket.emit("game:resign")
             }
           }}
         >
-          <Text style={styles.bottomBarIcon}>✕</Text>
-          <Text style={styles.bottomBarLabel}>Resign</Text>
+          <Text style={chessGameStyles.bottomBarIcon}>✕</Text>
+          <Text style={chessGameStyles.bottomBarLabel}>Resign</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={chessGameStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") {
               socket.emit("game:offerDraw")
             }
           }}
         >
-          <Text style={styles.bottomBarIcon}>½</Text>
-          <Text style={styles.bottomBarLabel}>Draw</Text>
+          <Text style={chessGameStyles.bottomBarIcon}>½</Text>
+          <Text style={chessGameStyles.bottomBarLabel}>Draw</Text>
         </TouchableOpacity>
       </View>
 
@@ -1165,23 +1061,23 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
 
       {/* Game End Modal */}
       <Modal visible={showGameEndModal} transparent animationType="fade" onRequestClose={() => {}}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.gameEndModal}>
-            <Text style={styles.gameEndTitle}>
+        <View style={chessGameStyles.modalOverlay}>
+          <View style={chessGameStyles.gameEndModal}>
+            <Text style={chessGameStyles.gameEndTitle}>
               {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
             </Text>
-            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
+            <Text style={chessGameStyles.gameEndMessage}>{gameEndMessage}</Text>
             {(gameEndDetails.reason || gameEndDetails.moveSan || gameEndDetails.winner) && (
-              <View style={styles.gameEndDetails}>
-                {gameEndDetails.reason && <Text style={styles.gameEndDetailText}>Reason: {gameEndDetails.reason}</Text>}
+              <View style={chessGameStyles.gameEndDetails}>
+                {gameEndDetails.reason && <Text style={chessGameStyles.gameEndDetailText}>Reason: {gameEndDetails.reason}</Text>}
                 {gameEndDetails.moveSan && (
-                  <Text style={styles.gameEndDetailText}>
+                  <Text style={chessGameStyles.gameEndDetailText}>
                     Move: {gameEndDetails.moveSan}
                     {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ""}
                   </Text>
                 )}
                 {gameEndDetails.winner && (
-                  <Text style={styles.gameEndDetailText}>
+                  <Text style={chessGameStyles.gameEndDetailText}>
                     Winner: {gameEndDetails.winner}
                     {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ""}
                   </Text>
@@ -1199,21 +1095,21 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
         animationType="fade"
         onRequestClose={() => setPromotionModal(null)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.promotionModal}>
-            <Text style={styles.promotionTitle}>👑 Choose Promotion Piece</Text>
-            <View style={styles.promotionOptions}>
+        <View style={chessGameStyles.modalOverlay}>
+          <View style={chessGameStyles.promotionModal}>
+            <Text style={chessGameStyles.promotionTitle}>👑 Choose Promotion Piece</Text>
+            <View style={chessGameStyles.promotionOptions}>
               {promotionModal &&
                 promotionModal.options.map((p) => (
-                  <TouchableOpacity key={p} style={styles.promotionOption} onPress={() => handlePromotionSelect(p)}>
+                  <TouchableOpacity key={p} style={chessGameStyles.promotionOption} onPress={() => handlePromotionSelect(p)}>
                     <View style={{ width: 40, height: 40, justifyContent: 'center', alignItems: 'center' }}>
                       {getPieceComponent(playerColor === "white" ? p.toUpperCase() : p.toLowerCase(), 40)}
                     </View>
                   </TouchableOpacity>
                 ))}
             </View>
-            <TouchableOpacity onPress={() => setPromotionModal(null)} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+            <TouchableOpacity onPress={() => setPromotionModal(null)} style={chessGameStyles.cancelButton}>
+              <Text style={chessGameStyles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1221,329 +1117,3 @@ export default function ChessGame({ initialGameState, userId, onNavigateToMenu }
     </View>
   )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#2c2c2c", // Chess.com dark background
-    justifyContent: "flex-start", // Changed from "space-between"
-  },
-  playerContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#2c2c2c",
-  },
-  topPlayer: {
-    paddingTop: 20, // Extra padding for status bar
-  },
-  bottomPlayer: {
-    paddingBottom: 20,
-  },
-  playerInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    backgroundColor: "#666",
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  avatarText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  playerDetails: {
-    flex: 1,
-  },
-  playerNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  playerName: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "500",
-    marginRight: 8,
-  },
-  playerRating: {
-    color: "#999",
-    fontSize: 14,
-  },
-  timerContainer: {
-    backgroundColor: "#1a1a1a",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    minWidth: 70,
-    alignItems: "center",
-  },
-  activeTimer: {
-    backgroundColor: "#4a4a4a",
-  },
-  timer: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontFamily: "monospace",
-  },
-  capturedPieces: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  capturedPieceGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginRight: 4,
-  },
-  capturedPiece: {
-    color: "#999",
-    fontSize: 12,
-  },
-  capturedCount: {
-    color: "#999",
-    fontSize: 10,
-    marginLeft: 2,
-  },
-  boardContainer: {
-    alignItems: "center",
-    flex: 1,
-    justifyContent: "center",
-    marginVertical: 10, // Add some margin
-  },
-  boardWrapper: {
-    position: "relative",
-  },
-  board: {
-    borderRadius: 0, // No border radius for full-width board
-  },
-  fileCoordinates: {
-    flexDirection: "row",
-    position: "absolute",
-    bottom: -20,
-    left: 0,
-  },
-  rankCoordinates: {
-    position: "absolute",
-    right: -20,
-    top: 0,
-  },
-  coordinateText: {
-    color: "#999",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  row: {
-    flexDirection: "row",
-  },
-  square: {
-    justifyContent: "center",
-    alignItems: "center",
-    position: "relative",
-  },
-  lastMoveSquare: {
-    backgroundColor: "#f7ec74", // Chess.com last move highlight
-  },
-  selectedSquare: {
-    backgroundColor: "#f7ec74", // Same as last move for consistency
-  },
-  piece: {
-    fontWeight: "bold",
-    color: "#000",
-    textShadowColor: "rgba(255,255,255,0.3)",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
-  possibleMoveDot: {
-    position: "absolute",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#4CAF50", // Green color for possible moves
-    opacity: 0.9,
-  },
-  captureDot: {
-    position: "absolute",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#F44336", // Red color for captures
-    opacity: 0.9,
-    top: 4,
-    right: 4,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 16,
-  },
-  moveHistoryModal: {
-    backgroundColor: "#2c2c2c",
-    borderRadius: 12,
-    width: "90%",
-    maxWidth: 400,
-    maxHeight: "70%",
-    borderWidth: 1,
-    borderColor: "#555",
-  },
-  moveHistoryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#555",
-  },
-  moveHistoryTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  closeButton: {
-    padding: 8,
-  },
-  closeButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  moveHistoryScroll: {
-    flex: 1,
-    padding: 16,
-  },
-  moveRow: {
-    flexDirection: "row",
-    marginBottom: 8,
-    alignItems: "center",
-  },
-  moveNumber: {
-    color: "#999",
-    fontSize: 14,
-    width: 30,
-    fontWeight: "bold",
-  },
-  moveText: {
-    color: "#fff",
-    fontSize: 14,
-    width: 60,
-    marginHorizontal: 8,
-  },
-  gameEndModal: {
-    backgroundColor: "#2c2c2c",
-    borderRadius: 16,
-    padding: 24,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-    maxWidth: "90%",
-  },
-  gameEndTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 16,
-    color: "#fff",
-  },
-  gameEndMessage: {
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 20,
-    color: "#fff",
-    lineHeight: 22,
-  },
-  gameEndDetails: {
-    marginBottom: 16,
-  },
-  gameEndDetailText: {
-    color: "#999",
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 4,
-  },
-  promotionModal: {
-    backgroundColor: "#2c2c2c",
-    borderRadius: 12,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-  },
-  promotionTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 20,
-    textAlign: "center",
-  },
-  promotionOptions: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginBottom: 20,
-    flexWrap: "wrap",
-  },
-  promotionOption: {
-    margin: 8,
-    padding: 12,
-    backgroundColor: "#F0D9B5",
-    borderRadius: 8,
-    minWidth: 50,
-    minHeight: 50,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  promotionPiece: {
-    fontSize: 28,
-    textAlign: "center",
-    color: "#000",
-  },
-  cancelButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: "#666",
-    borderRadius: 8,
-  },
-  cancelButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  bottomBar: {
-    flexDirection: "row",
-    backgroundColor: "#1a1a1a",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    justifyContent: "space-around",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#333",
-  },
-  bottomBarButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    minWidth: 60,
-  },
-  bottomBarIcon: {
-    fontSize: 24,
-    marginBottom: 4,
-    color: "#999", // Professional gray color that matches the theme
-    fontWeight: "bold",
-  },
-  bottomBarLabel: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-})

@@ -23,105 +23,9 @@ import SixPointerChess from "../(game)/variants/six-pointer"
 import { setNavigationVisibility } from "../../utils/navigationState"
 import { getSocket } from "../../utils/socketManager"
 import VariantCard from "../components/ui/VariantCard"
-
-// Re-use the GameState interface or import it if defined in a shared file
-interface GameState {
-  sessionId: string
-  variantName: string
-  subvariantName?: string
-  description: string
-  players: {
-    white: {
-      userId: string
-      username: string
-      rating: number
-      avatar: string | null
-      title: string | null
-    }
-    black: {
-      userId: string
-      username: string
-      rating: number
-      avatar: string | null
-      title: string | null
-    }
-  }
-  board: {
-    fen: string
-    position: string
-    activeColor: "white" | "black"
-    castlingRights: string
-    enPassantSquare: string
-    halfmoveClock: number
-    fullmoveNumber: number
-    whiteTime?: number
-    blackTime?: number
-    turnStartTimestamp?: number
-    lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
-    pocketedPieces: {
-      white: string[]
-      black: string[]
-    }
-    dropTimers?: {
-      white: { [piece: string]: number }
-      black: { [piece: string]: number }
-    }
-    gameStarted?: boolean
-    firstMoveTimestamp?: number
-    gameEnded?: boolean
-    endReason?: string | null
-    winner?: string | null
-    endTimestamp?: number | null
-  }
-  timeControl: {
-    type: string
-    baseTime: number
-    increment: number
-    timers: {
-      white: number
-      black: number
-    }
-    flagged: {
-      white: boolean
-      black: boolean
-    }
-  }
-  status: string
-  result: string
-  moves: string[]
-  moveCount: number
-  lastMove: string | null
-  gameState: {
-    check: boolean
-    checkmate: boolean
-    stalemate: boolean
-  }
-  userColor: {
-    [key: string]: "white" | "black"
-  }
-}
-
-interface TournamentOption {
-  title: string
-  description: string
-  action: string
-  rules: string
-  height: number
-}
-
-interface TournamentDetails {
-  id: string
-  name: string
-  capacity: number
-  startTime: number
-  duration: number
-  entryFee: number
-  prizePool: number
-  status: "open" | "in-progress" | "finished"
-  participantsCount: number
-  createdAt: number
-}
+import { tournamentScreenStyles } from "../lib/styles/screens"
+import { GameState } from "../lib/types/gamestate"
+import { TournamentDetails} from "../lib/types/miscellaneous"
 
 
 export default function TournamentScreen() {
@@ -394,57 +298,57 @@ export default function TournamentScreen() {
       case "crazyhouse":
         return <CrazyHouseChess initialGameState={gameState} userId={userId} />
       default:
-        return <Text style={styles.errorText}>Unsupported variant: {matchedVariant}</Text>
+        return <Text style={tournamentScreenStyles.errorText}>Unsupported variant: {matchedVariant}</Text>
     }
   } else if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={tournamentScreenStyles.container}>
         <ActivityIndicator size="large" color="#00A862" />
-        <Text style={styles.infoText}>Waiting for match to be established...</Text>
+        <Text style={tournamentScreenStyles.infoText}>Waiting for match to be established...</Text>
       </View>
     )
   }
 
   // Tournament Lobby UI with Choose.tsx styling
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollViewContent}>
+    <View style={tournamentScreenStyles.container}>
+      <ScrollView contentContainerStyle={tournamentScreenStyles.scrollViewContent}>
         {/* Victory Rush Card */}
-        <View style={styles.victoryRushCard}>
-          <View style={styles.victoryRushContent}>
+        <View style={tournamentScreenStyles.victoryRushCard}>
+          <View style={tournamentScreenStyles.victoryRushContent}>
             <Image 
               source={require("../../assets/tl.png")} 
-              style={styles.victoryRushLogo}
+              style={tournamentScreenStyles.victoryRushLogo}
               resizeMode="contain"
             />
-            <Text style={styles.victoryRushSubtitle}>Rack up wins.</Text>
+            <Text style={tournamentScreenStyles.victoryRushSubtitle}>Rack up wins.</Text>
             {activeTournament && (
-              <Text style={styles.closingTimeText}>
+              <Text style={tournamentScreenStyles.closingTimeText}>
                 Closing at {new Date(activeTournament.startTime + activeTournament.duration).toLocaleTimeString()}
               </Text>
             )}
             <TouchableOpacity 
-              style={styles.joinNowButton}
+              style={tournamentScreenStyles.joinNowButton}
               onPress={() => router.push({ pathname: "/(main)/streak-master", params: { userId } } as any)}
               disabled={isTournamentQueueing || isJoiningTournament}
             >
-              <Text style={styles.joinNowText}>Join Now</Text>
+              <Text style={tournamentScreenStyles.joinNowText}>Join Now</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Tournament Status */}
         {isTournamentQueueing && (
-          <View style={styles.connectingContainer}>
-            <Text style={styles.connectingText}>Searching for tournament match...</Text>
+          <View style={tournamentScreenStyles.connectingContainer}>
+            <Text style={tournamentScreenStyles.connectingText}>Searching for tournament match...</Text>
             <ActivityIndicator size="small" color="#00A862" style={{ marginVertical: 10 }} />
-            <Text style={styles.connectingTimer}>Time in queue: {timer}s</Text>
-            {opponent && !isMatchFound && <Text style={styles.matchFoundText}>Match Found with {opponent}!</Text>}
+            <Text style={tournamentScreenStyles.connectingTimer}>Time in queue: {timer}s</Text>
+            {opponent && !isMatchFound && <Text style={tournamentScreenStyles.matchFoundText}>Match Found with {opponent}!</Text>}
           </View>
         )}
 
         {/* Tournament Options */}
-        <View style={styles.variantsColumn}>
+        <View style={tournamentScreenStyles.variantsColumn}>
           <VariantCard
             key={tournamentOptions[0].title}
             variantName={tournamentOptions[0].title}
@@ -456,7 +360,7 @@ export default function TournamentScreen() {
             // loading={isConnecting && activeButton === tournamentOptions[0].action}
           />
           {isTournamentQueueing && (
-            <Text style={styles.statusText}>Currently in queue - Tap to leave</Text>
+            <Text style={tournamentScreenStyles.statusText}>Currently in queue - Tap to leave</Text>
           )}
           {isJoiningTournament && (
             <ActivityIndicator size="small" color="#00A862" style={{ marginTop: 5 }} />
@@ -466,14 +370,14 @@ export default function TournamentScreen() {
       
       {/* Rules Modal */}
       <Modal visible={showRulesModal} transparent={true} animationType="fade" onRequestClose={closeRulesModal}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.rulesModal}>
-            <Text style={styles.rulesTitle}>{selectedRulesTitle}</Text>
-            <ScrollView style={styles.rulesContent}>
-              <Text style={styles.rulesText}>{selectedRulesContent}</Text>
+        <View style={tournamentScreenStyles.modalOverlay}>
+          <View style={tournamentScreenStyles.rulesModal}>
+            <Text style={tournamentScreenStyles.rulesTitle}>{selectedRulesTitle}</Text>
+            <ScrollView style={tournamentScreenStyles.rulesContent}>
+              <Text style={tournamentScreenStyles.rulesText}>{selectedRulesContent}</Text>
             </ScrollView>
-            <TouchableOpacity style={styles.closeRulesButton} onPress={closeRulesModal}>
-              <Text style={styles.closeRulesButtonText}>Close</Text>
+            <TouchableOpacity style={tournamentScreenStyles.closeRulesButton} onPress={closeRulesModal}>
+              <Text style={tournamentScreenStyles.closeRulesButtonText}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -482,308 +386,4 @@ export default function TournamentScreen() {
   )
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#1C1C1E", // Main background color from Choose.tsx
-  },
-  victoryRushCard: {
-    backgroundColor: "#69923e", // Deep purple color
-    borderRadius: 16,
-    marginBottom: 20,
-    marginTop: 100, // Space for the overlapping logo
-    padding: 0,
-    paddingBottom: 24,
-  },
-  victoryRushContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  victoryRushLogo: {
-    width: '150%',
-    height: 250,
-    position: 'absolute',
-    top: -100, // Pull the logo up to overlap
-    zIndex: 1,
-  },
-  victoryRushTitle: {
-    color: "#FFF5E1", // Off-white color
-    fontSize: 32,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginVertical: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-    lineHeight: 38,
-  },
-  victoryRushSubtitle: {
-    paddingTop: 90,
-    color: "#FFF5E1",
-    fontSize: 18,
-    marginBottom: 20,
-    opacity: 0.9,
-  },
-  closingTimeText: {
-    color: "#FFA500",
-    fontSize: 16,
-    marginBottom: 16,
-    fontWeight: "600",
-  },
-  joinNowButton: {
-    backgroundColor: "#FFA500", // Orange color
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 24,
-    marginTop: 8,
-    minWidth: 160,
-  },
-  joinNowText: {
-    color: "#000",
-    fontSize: 18,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  // Header and nav styles removed
-  topNavButton: {
-    alignItems: "center",
-    width: "30%",
-  },
-  iconContainer: {
-    position: "relative",
-    width: "100%",
-    height: 45,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 4,
-  },
-  iconBackground: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-    backgroundColor: "rgba(255, 255, 255, 0.08)", // Icon background from Choose.tsx
-    borderRadius: 12,
-  },
-  icon: {
-    zIndex: 1,
-    marginBottom: 16,
-  },
-  topNavButtonText: {
-    position: "absolute",
-    bottom: 8,
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "center",
-    zIndex: 1,
-    opacity: 0.9,
-  },
-  scrollViewContent: {
-    flexGrow: 1,
-    padding: 20,
-    paddingTop: 0, // Remove top padding to allow logo to overlap properly
-  },
-  connectingContainer: {
-    marginBottom: 20,
-    alignItems: "center",
-    backgroundColor: "#2C2C2E", // Card background from Choose.tsx
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  connectingText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    marginBottom: 10,
-    textAlign: "center",
-  },
-  connectingTimer: {
-    color: "#B0B0B0", // Secondary text color from Choose.tsx
-    fontSize: 16,
-    marginTop: 5,
-  },
-  matchFoundText: {
-    color: "#00A862", // Green accent color from Choose.tsx
-    fontSize: 20,
-    fontWeight: "bold",
-    marginTop: 15,
-    textAlign: "center",
-  },
-  variantsColumn: {
-    flexDirection: "column",
-    width: "100%",
-  },
-  variantCard: {
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    width: "100%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  variantCardContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  cardLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  variantIconContainer: {
-    position: "relative",
-    width: 52,
-    height: 52,
-    marginRight: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#769656", // Chess piece background from Choose.tsx
-    borderRadius: 12,
-  },
-  cardTextContainer: {
-    flex: 1,
-  },
-  variantTitle: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 4,
-  },
-  variantSubtitle: {
-    color: "rgba(255, 255, 255, 0.8)", // Subtitle color from Choose.tsx
-    fontSize: 14,
-    marginBottom: 8,
-    lineHeight: 18,
-  },
-  statusText: {
-    color: "#00A862",
-    fontSize: 12,
-    fontStyle: "italic",
-    marginTop: 5,
-  },
-  arrowText: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    fontWeight: "300",
-  },
-  cardDisabled: {
-    opacity: 0.5,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.8)", // Modal overlay from Choose.tsx
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  rulesModal: {
-    backgroundColor: "#3A3A3C", // Modal background from Choose.tsx
-    borderRadius: 16,
-    padding: 24,
-    width: "100%",
-    maxWidth: 400,
-    maxHeight: "80%",
-    borderColor: "#48484A", // Modal border from Choose.tsx
-    borderWidth: 1,
-  },
-  rulesTitle: {
-    color: "#00A862", // Green title from Choose.tsx
-    fontSize: 22,
-    fontWeight: "bold",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  rulesContent: {
-    maxHeight: 300,
-    marginBottom: 20,
-  },
-  rulesText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: "left",
-  },
-  closeRulesButton: {
-    backgroundColor: "#00A862", // Green button from Choose.tsx
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    alignSelf: "center",
-  },
-  closeRulesButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  // Bottom nav bar removed
-  // Navigation button styles removed
-  errorText: {
-    color: "#fff",
-    fontSize: 20,
-    textAlign: "center",
-  },
-  infoText: {
-    color: "#b0b3b8",
-    fontSize: 18,
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  mainTournamentCard: {
-    borderRadius: 16,
-    padding: 0,
-    marginBottom: 16,
-    width: "100%",
-    minHeight: 280,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 6,
-    overflow: "hidden",
-  },
-  mainTournamentCardContent: {
-    flex: 1,
-    height: "100%",
-  },
-  mainCardLayout: {
-    flex: 1,
-    flexDirection: "column",
-  },
-  tournamentImageContainer: {
-    height: 160,
-    width: "100%",
-    overflow: "hidden",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  tournamentImage: {
-    width: "200%",
-    height: "200%",
-  },
-  mainCardTextContainer: {
-    padding: 20,
-    flex: 1,
-    justifyContent: "center",
-  },
-  mainCardTitle: {
-    color: "#FFFFFF",
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  mainCardDescription: {
-    color: "rgba(255, 255, 255, 0.8)",
-    fontSize: 16,
-    lineHeight: 22,
-    textAlign: "center",
-    marginBottom: 10,
-  },
-})
+

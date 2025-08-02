@@ -4,132 +4,24 @@ import { getPieceComponent } from "@/app/components"
 import { getSocketInstance } from "@/utils/socketManager"
 import { useRouter } from "expo-router"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
+import { Alert, Dimensions, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
+import { decayStyles } from "@/app/lib/styles"
+import { DecayChessGameProps, GameState, DecayState, Move } from "@/app/lib/types/decay"
+const screenWidth = Dimensions.get("window").width
+const screenHeight = Dimensions.get("window").height
+const isTablet = Math.min(screenWidth, screenHeight) > 600
+const isSmallScreen = screenWidth < 380
+
+// Improved responsive sizing for better centering
+const horizontalPadding = isSmallScreen ? 8 : isTablet ? 20 : 12
+const boardSize = screenWidth - horizontalPadding * 2
+const squareSize = boardSize / 8
+
+const decayTimerFontSize = isSmallScreen ? 8 : 10
+const pieceFontSize = squareSize * (isSmallScreen ? 0.6 : isTablet ? 0.7 : 0.65)
 
 
-// Types
-interface Player {
-  userId: string
-  username: string
-  rating: number
-  avatar: string | null
-  title: string | null
-}
-
-interface GameState {
-  sessionId: string
-  variantName: string
-  subvariantName?: string
-  description: string
-  players: {
-    white: Player
-    black: Player
-  }
-  board: {
-    fen: string
-    position: string
-    activeColor: "white" | "black"
-    castlingRights: string
-    enPassantSquare: string
-    halfmoveClock: number
-    fullmoveNumber: number
-    whiteTime?: number
-    blackTime?: number
-    turnStartTimestamp?: number
-    lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
-    repetitionMap?: any
-    gameStarted?: boolean
-    firstMoveTimestamp?: number
-    capturedPieces?: {
-      white: string[]
-      black: string[]
-    }
-  }
-  timeControl: {
-    type: string
-    baseTime: number
-    increment: number
-    timers: {
-      white: number
-      black: number
-    }
-    flagged: {
-      white: boolean
-      black: boolean
-    }
-    timeSpent?: { white: any; black: any }
-  }
-  status: string
-  result: string
-  resultReason?: string | null
-  winner?: string | null
-  moves: any[]
-  moveCount: number
-  lastMove: any
-  gameState: {
-    valid?: boolean
-    move?: any
-    state?: any
-    result?: string
-    check?: boolean
-    checkmate?: boolean
-    stalemate?: boolean
-    insufficientMaterial?: boolean
-    threefoldRepetition?: boolean
-    fiftyMoveRule?: boolean
-    canCastleKingside?: { white?: boolean; black?: boolean }
-    canCastleQueenside?: { white?: boolean; black?: boolean }
-    promotionAvailable?: boolean
-    lastMove?: any
-    winner?: string | null
-    drawReason?: string | null
-    gameEnded?: boolean
-    endReason?: string | null
-    endTimestamp?: number
-    decayActive?: boolean
-    queenDecayTimers?: any
-    majorPieceDecayTimers?: any
-    frozenPieces?: any
-  }
-  userColor: {
-    [key: string]: "white" | "black"
-  }
-  positionHistory?: string[]
-  createdAt?: number
-  lastActivity?: number
-  startedAt?: number
-  endedAt?: number | null
-  rules?: any
-  metadata?: any
-  timers?: any
-}
-
-interface Move {
-  from: string
-  to: string
-  promotion?: string
-}
-
-interface DecayChessGameProps {
-  initialGameState: GameState
-  userId: string
-  onNavigateToMenu?: () => void
-}
-
-// Decay timer state for individual pieces
-interface DecayTimer {
-  timeLeft: number // in milliseconds
-  isActive: boolean
-  moveCount: number // how many times this piece has been moved
-  pieceSquare: string // track which square the piece is on
-}
-
-// Track decay timers for each piece position
-interface DecayState {
-  [square: string]: DecayTimer
-}
 
 const PIECE_VALUES = {
   p: 1,
@@ -156,29 +48,6 @@ const MAJOR_PIECES = ["q", "r", "b", "n", "Q", "R", "B", "N"]
 const QUEEN_INITIAL_DECAY_TIME = 25000 // 25 seconds
 const MAJOR_PIECE_INITIAL_DECAY_TIME = 20000 // 20 seconds
 const DECAY_TIME_INCREMENT = 2000 // +2 seconds per additional move
-
-// Responsive sizing constants
-const screenWidth = Dimensions.get("window").width
-const screenHeight = Dimensions.get("window").height
-const isTablet = Math.min(screenWidth, screenHeight) > 600
-const isSmallScreen = screenWidth < 380
-const isVerySmallScreen = screenWidth < 320
-
-// Improved responsive sizing for better centering
-const horizontalPadding = isSmallScreen ? 8 : isTablet ? 20 : 12
-const boardSize = screenWidth - horizontalPadding * 2
-const squareSize = boardSize / 8
-
-// Dynamic sizing based on screen size with better proportions
-const playerInfoHeight = isSmallScreen ? 70 : isTablet ? 100 : 85
-const gameStatusHeight = isSmallScreen ? 35 : 45
-const bottomBarHeight = isSmallScreen ? 65 : 75
-const decayTimerFontSize = isSmallScreen ? 8 : 10
-const pieceFontSize = squareSize * (isSmallScreen ? 0.6 : isTablet ? 0.7 : 0.65)
-
-// Improved spacing constants
-const verticalSpacing = isSmallScreen ? 8 : isTablet ? 16 : 12
-const componentSpacing = isSmallScreen ? 6 : isTablet ? 12 : 8
 
 // Format decay timer in MM:SS format
 const formatDecayTimeMinutes = (milliseconds: number): string => {
@@ -1278,11 +1147,11 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       })
 
       return (
-        <View style={styles.capturedPieces}>
+        <View style={decayStyles.capturedPieces}>
           {Object.entries(pieceCounts).map(([piece, count]) => (
-            <View key={piece} style={styles.capturedPieceGroup}>
+            <View key={piece} style={decayStyles.capturedPieceGroup}>
               {getPieceComponent(piece, isSmallScreen ? 14 : 16)}
-              {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
+              {count > 1 && <Text style={decayStyles.capturedCount}>{count}</Text>}
             </View>
           ))}
         </View>
@@ -1353,7 +1222,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
           {hasActiveDecayTimer && decayTimeLeft > 0 && (
             <View
               style={[
-                styles.decayTimerAbove,
+                decayStyles.decayTimerAbove,
                 {
                   width: squareSize,
                   left: 0,
@@ -1361,8 +1230,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
                 },
               ]}
             >
-              <View style={styles.decayTimerBox}>
-                <Text style={[styles.decayTimerBoxText, { fontSize: decayTimerFontSize }]}>
+              <View style={decayStyles.decayTimerBox}>
+                <Text style={[decayStyles.decayTimerBoxText, { fontSize: decayTimerFontSize }]}>
                   {formatDecayTimeMinutes(decayTimeLeft)}
                 </Text>
               </View>
@@ -1371,7 +1240,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
           <TouchableOpacity
             style={[
-              styles.square,
+              decayStyles.square,
               {
                 width: squareSize,
                 height: squareSize,
@@ -1386,8 +1255,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
             {file === "a" && (
               <Text
                 style={[
-                  styles.coordinateLabel,
-                  styles.rankLabel,
+                  decayStyles.coordinateLabel,
+                  decayStyles.rankLabel,
                   {
                     color: isLight ? "#769656" : "#F0D9B5",
                     fontSize: isSmallScreen ? 8 : 10,
@@ -1400,8 +1269,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
             {rank === "1" && (
               <Text
                 style={[
-                  styles.coordinateLabel,
-                  styles.fileLabel,
+                  decayStyles.coordinateLabel,
+                  decayStyles.fileLabel,
                   {
                     color: isLight ? "#769656" : "#F0D9B5",
                     fontSize: isSmallScreen ? 8 : 10,
@@ -1425,8 +1294,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
             {/* Frozen indicator */}
             {isFrozen && (
-              <View style={[styles.frozenIndicator, { width: squareSize * 0.25, height: squareSize * 0.25 }]}>
-                <Text style={[styles.frozenText, { fontSize: squareSize * 0.15 }]}>❄️</Text>
+              <View style={[decayStyles.frozenIndicator, { width: squareSize * 0.25, height: squareSize * 0.25 }]}>
+                <Text style={[decayStyles.frozenText, { fontSize: squareSize * 0.15 }]}>❄️</Text>
               </View>
             )}
 
@@ -1434,7 +1303,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
             {isPossibleMove && !piece && (
               <View
                 style={[
-                  styles.possibleMoveDot,
+                  decayStyles.possibleMoveDot,
                   {
                     width: squareSize * 0.25,
                     height: squareSize * 0.25,
@@ -1446,7 +1315,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
             {isPossibleMove && piece && (
               <View
                 style={[
-                  styles.captureIndicator,
+                  decayStyles.captureIndicator,
                   {
                     width: squareSize * 0.3,
                     height: squareSize * 0.3,
@@ -1479,8 +1348,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     // Check if game has ended
     if (gameState.status === "ended" || gs.gameEnded) {
       return (
-        <View style={styles.gameStatusContainer}>
-          <Text style={styles.gameOverText}>🏁 Game Ended 🏁</Text>
+        <View style={decayStyles.gameStatusContainer}>
+          <Text style={decayStyles.gameOverText}>🏁 Game Ended 🏁</Text>
         </View>
       )
     }
@@ -1498,10 +1367,10 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
-      <View style={styles.boardContainer}>
-        <View style={styles.board}>
+      <View style={decayStyles.boardContainer}>
+        <View style={decayStyles.board}>
           {ranks.map((rank) => (
-            <View key={rank} style={styles.row}>
+            <View key={rank} style={decayStyles.row}>
               {files.map((file) => renderSquare(file, rank))}
             </View>
           ))}
@@ -1515,8 +1384,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       const player = gameState.players[color]
       if (!player) {
         return (
-          <View style={styles.playerInfoContainer}>
-            <Text style={styles.playerName}>Unknown Player</Text>
+          <View style={decayStyles.playerInfoContainer}>
+            <Text style={decayStyles.playerName}>Unknown Player</Text>
           </View>
         )
       }
@@ -1533,31 +1402,31 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       const frozenPiecesCount = frozenPieces[color].size
 
       return (
-        <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
-          <View style={styles.playerHeader}>
-            <View style={styles.playerDetails}>
-              <View style={styles.playerNameRow}>
-                <View style={styles.playerAvatar}>
-                  <Text style={styles.playerAvatarText}>{player.username.charAt(0).toUpperCase()}</Text>
+        <View style={[decayStyles.playerInfoContainer, isActive && decayStyles.activePlayerContainer]}>
+          <View style={decayStyles.playerHeader}>
+            <View style={decayStyles.playerDetails}>
+              <View style={decayStyles.playerNameRow}>
+                <View style={decayStyles.playerAvatar}>
+                  <Text style={decayStyles.playerAvatarText}>{player.username.charAt(0).toUpperCase()}</Text>
                 </View>
-                <View style={styles.playerNameContainer}>
-                  <Text style={[styles.playerName, isActive && styles.activePlayerName]} numberOfLines={1}>
+                <View style={decayStyles.playerNameContainer}>
+                  <Text style={[decayStyles.playerName, isActive && decayStyles.activePlayerName]} numberOfLines={1}>
                     {player.username}
                   </Text>
-                  <Text style={styles.playerRating}>({player.rating > 0 ? player.rating : "Unrated"})</Text>
+                  <Text style={decayStyles.playerRating}>({player.rating > 0 ? player.rating : "Unrated"})</Text>
                 </View>
-                {isMe && <Text style={styles.youIndicator}>(You)</Text>}
+                {isMe && <Text style={decayStyles.youIndicator}>(You)</Text>}
               </View>
               {/* Decay status */}
               {(activeDecayTimers > 0 || frozenPiecesCount > 0) && (
-                <View style={styles.decayStatus}>
-                  {activeDecayTimers > 0 && <Text style={styles.decayStatusText}>⏱️ {activeDecayTimers} decaying</Text>}
-                  {frozenPiecesCount > 0 && <Text style={styles.frozenStatusText}>❄️ {frozenPiecesCount} frozen</Text>}
+                <View style={decayStyles.decayStatus}>
+                  {activeDecayTimers > 0 && <Text style={decayStyles.decayStatusText}>⏱️ {activeDecayTimers} decaying</Text>}
+                  {frozenPiecesCount > 0 && <Text style={decayStyles.frozenStatusText}>❄️ {frozenPiecesCount} frozen</Text>}
                 </View>
               )}
             </View>
-            <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
-              <Text style={[styles.timerText, isActive && styles.activeTimerText]}>{formatTime(timer)}</Text>
+            <View style={[decayStyles.timerContainer, isActive && decayStyles.activeTimerContainer]}>
+              <Text style={[decayStyles.timerText, isActive && decayStyles.activeTimerText]}>{formatTime(timer)}</Text>
             </View>
           </View>
           {renderCapturedPieces(color)}
@@ -1593,20 +1462,20 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
     return (
       <Modal visible={showMoveHistory} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.moveHistoryModal}>
-            <View style={styles.moveHistoryHeader}>
-              <Text style={styles.moveHistoryTitle}>📜 Move History</Text>
-              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>✕</Text>
+        <View style={decayStyles.modalOverlay}>
+          <View style={decayStyles.moveHistoryModal}>
+            <View style={decayStyles.moveHistoryHeader}>
+              <Text style={decayStyles.moveHistoryTitle}>📜 Move History</Text>
+              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={decayStyles.closeButton}>
+                <Text style={decayStyles.closeButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.moveHistoryScroll}>
+            <ScrollView style={decayStyles.moveHistoryScroll}>
               {movePairs.map((pair, index) => (
-                <View key={index} style={styles.moveRow}>
-                  <Text style={styles.moveNumber}>{pair.moveNumber}.</Text>
-                  <Text style={styles.moveText}>{pair.white}</Text>
-                  <Text style={styles.moveText}>{pair.black}</Text>
+                <View key={index} style={decayStyles.moveRow}>
+                  <Text style={decayStyles.moveNumber}>{pair.moveNumber}.</Text>
+                  <Text style={decayStyles.moveText}>{pair.white}</Text>
+                  <Text style={decayStyles.moveText}>{pair.black}</Text>
                 </View>
               ))}
             </ScrollView>
@@ -1624,7 +1493,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   const opponentColor = playerColor === "white" ? "black" : "white"
 
   return (
-    <View style={styles.container}>
+    <View style={decayStyles.container}>
       {/* Opponent Player (always at top) */}
       {renderPlayerInfo(opponentColor)}
 
@@ -1638,36 +1507,36 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       {renderPlayerInfo(playerColor)}
 
       {/* Bottom Control Bar */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
-          <Text style={styles.bottomBarIcon}>≡</Text>
-          <Text style={styles.bottomBarLabel}>Moves</Text>
+      <View style={decayStyles.bottomBar}>
+        <TouchableOpacity style={decayStyles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
+          <Text style={decayStyles.bottomBarIcon}>≡</Text>
+          <Text style={decayStyles.bottomBarLabel}>Moves</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={handleFlipBoard}>
-          <Text style={styles.bottomBarIcon}>⟲</Text>
-          <Text style={styles.bottomBarLabel}>Flip</Text>
+        <TouchableOpacity style={decayStyles.bottomBarButton} onPress={handleFlipBoard}>
+          <Text style={decayStyles.bottomBarIcon}>⟲</Text>
+          <Text style={decayStyles.bottomBarLabel}>Flip</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={decayStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") {
               socket.emit("game:resign")
             }
           }}
         >
-          <Text style={styles.bottomBarIcon}>✕</Text>
-          <Text style={styles.bottomBarLabel}>Resign</Text>
+          <Text style={decayStyles.bottomBarIcon}>✕</Text>
+          <Text style={decayStyles.bottomBarLabel}>Resign</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={decayStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") {
               socket.emit("game:offerDraw")
             }
           }}
         >
-          <Text style={styles.bottomBarIcon}>½</Text>
-          <Text style={styles.bottomBarLabel}>Draw</Text>
+          <Text style={decayStyles.bottomBarIcon}>½</Text>
+          <Text style={decayStyles.bottomBarLabel}>Draw</Text>
         </TouchableOpacity>
       </View>
 
@@ -1677,14 +1546,14 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       {/* Promotion Modal */}
       {promotionModal && (
         <Modal visible={promotionModal.visible} transparent animationType="slide">
-          <View style={styles.modalOverlay}>
-            <View style={styles.promotionModal}>
-              <Text style={styles.promotionTitle}>Choose Promotion</Text>
-              <View style={styles.promotionOptions}>
+          <View style={decayStyles.modalOverlay}>
+            <View style={decayStyles.promotionModal}>
+              <Text style={decayStyles.promotionTitle}>Choose Promotion</Text>
+              <View style={decayStyles.promotionOptions}>
                 {promotionModal.options.map((option) => (
                   <TouchableOpacity
                     key={option}
-                    style={styles.promotionOption}
+                    style={decayStyles.promotionOption}
                     onPress={() => handlePromotionSelect(option)}
                   >
                     {getPieceComponent(
@@ -1701,33 +1570,33 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
       {/* Game End Modal */}
       <Modal visible={showGameEndModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <View style={decayStyles.modalOverlay}>
           <View
             style={[
-              styles.gameEndModal,
-              isWinner === true && styles.victoryModal,
-              isWinner === false && styles.defeatModal,
+              decayStyles.gameEndModal,
+              isWinner === true && decayStyles.victoryModal,
+              isWinner === false && decayStyles.defeatModal,
             ]}
           >
             <Text
               style={[
-                styles.gameEndTitle,
-                isWinner === true && styles.victoryTitle,
-                isWinner === false && styles.defeatTitle,
+                decayStyles.gameEndTitle,
+                isWinner === true && decayStyles.victoryTitle,
+                isWinner === false && decayStyles.defeatTitle,
               ]}
             >
               {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
             </Text>
-            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
-            {gameEndDetails.reason && <Text style={styles.gameEndReason}>Reason: {gameEndDetails.reason}</Text>}
+            <Text style={decayStyles.gameEndMessage}>{gameEndMessage}</Text>
+            {gameEndDetails.reason && <Text style={decayStyles.gameEndReason}>Reason: {gameEndDetails.reason}</Text>}
             {gameEndDetails.moveSan && (
-              <Text style={styles.gameEndMove}>
+              <Text style={decayStyles.gameEndMove}>
                 Move: {gameEndDetails.moveSan} by {gameEndDetails.moveMaker}
               </Text>
             )}
-            {gameEndDetails.winnerName && <Text style={styles.gameEndWinner}>Winner: {gameEndDetails.winnerName}</Text>}
-            <TouchableOpacity style={styles.menuButton} onPress={navigateToMenu}>
-              <Text style={styles.menuButtonText}>Back to Menu</Text>
+            {gameEndDetails.winnerName && <Text style={decayStyles.gameEndWinner}>Winner: {gameEndDetails.winnerName}</Text>}
+            <TouchableOpacity style={decayStyles.menuButton} onPress={navigateToMenu}>
+              <Text style={decayStyles.menuButtonText}>Back to Menu</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1735,438 +1604,3 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     </View>
   )
 }
-
-// Updated styles with improved centering and responsive design
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#312e2b", // Chess.com dark background
-    paddingTop: isSmallScreen ? 30 : isTablet ? 60 : 50,
-    paddingBottom: bottomBarHeight,
-    paddingHorizontal: horizontalPadding,
-  },
-  boardContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginVertical: verticalSpacing,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    // Ensure the board is perfectly centered
-    alignSelf: "center",
-  },
-  board: {
-    flexDirection: "column",
-    borderRadius: 4,
-    overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "#4a4a4a",
-    width: boardSize,
-    height: boardSize,
-  },
-  row: {
-    flexDirection: "row",
-    flex: 1,
-  },
-  square: {
-    justifyContent: "center",
-    alignItems: "center",
-    position: "relative",
-    flex: 1,
-  },
-  playerInfoContainer: {
-   
-    borderRadius: 2,
-    paddingHorizontal: isSmallScreen ? 12 : isTablet ? 20 : 16,
-    paddingVertical: isSmallScreen ? 10 : isTablet ? 16 : 12,
-    marginVertical: componentSpacing,
-
-
-    minHeight: playerInfoHeight,
-    // Improved shadow for better visual separation
- 
-
-   
-  
-  },
-  activePlayerContainer: {
-    backgroundColor: "#2d5a2d",
-    borderColor: "#4ade80",
-    borderWidth: 2,
-    shadowColor: "#4ade80",
-    shadowOpacity: 0.3,
-  },
-  playerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  playerDetails: {
-    flex: 1,
-    marginRight: isSmallScreen ? 8 : 12,
-  },
-  playerNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: isSmallScreen ? 4 : 6,
-  },
-  playerAvatar: {
-    width: isSmallScreen ? 32 : isTablet ? 48 : 40,
-    height: isSmallScreen ? 32 : isTablet ? 48 : 40,
-    borderRadius: isSmallScreen ? 16 : isTablet ? 24 : 20,
-    backgroundColor: "#4a4a4a",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: isSmallScreen ? 8 : isTablet ? 16 : 12,
-  },
-  playerAvatarText: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 14 : isTablet ? 20 : 16,
-    fontWeight: "bold",
-  },
-  playerNameContainer: {
-    flex: 1,
-    marginRight: 8,
-  },
-  playerName: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
-    fontWeight: "600",
-  },
-  activePlayerName: {
-    color: "#4ade80",
-  },
-  playerRating: {
-    color: "#a1a1aa",
-    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
-    marginTop: 2,
-  },
-  youIndicator: {
-    color: "#60a5fa",
-    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
-    fontWeight: "500",
-    backgroundColor: "#1e3a8a",
-    paddingHorizontal: isSmallScreen ? 6 : 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  decayStatus: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-  decayStatusText: {
-    color: "#f97316",
-    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
-    marginRight: 12,
-    marginTop: 2,
-  },
-  frozenStatusText: {
-    color: "#ef4444",
-    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
-    marginTop: 2,
-  },
-  timerContainer: {
-    backgroundColor: "#1a1a1a",
-    paddingHorizontal: isSmallScreen ? 12 : isTablet ? 20 : 16,
-    paddingVertical: isSmallScreen ? 8 : isTablet ? 12 : 10,
-    borderRadius: 20,
-    minWidth: isSmallScreen ? 70 : isTablet ? 100 : 80,
-    alignItems: "center",
-  },
-  activeTimerContainer: {
-    backgroundColor: "#fff",
-  },
-  timerText: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 16 : isTablet ? 22 : 18,
-    fontWeight: "bold",
-    fontFamily: "monospace",
-  },
-  activeTimerText: {
-    color: "#000",
-  },
-  capturedPieces: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: isSmallScreen ? 8 : isTablet ? 16 : 12,
-    paddingTop: isSmallScreen ? 6 : isTablet ? 12 : 8,
-    borderTopWidth: 1,
-    borderTopColor: "#3a3a3a",
-  },
-  capturedPieceGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginRight: 8,
-    marginBottom: 4,
-  },
-  capturedCount: {
-    color: "#a1a1aa",
-    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
-    marginLeft: 2,
-    fontWeight: "bold",
-  },
-  gameStatusContainer: {
-    alignItems: "center",
-    marginVertical: componentSpacing,
-    paddingHorizontal: 16,
-    minHeight: gameStatusHeight,
-    justifyContent: "center",
-  },
-  gameOverText: {
-    color: "#ef4444",
-    fontSize: isSmallScreen ? 16 : isTablet ? 22 : 18,
-    fontWeight: "bold",
-  },
-  turnIndicator: {
-    color: "#a1a1aa",
-    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
-    marginBottom: 4,
-    textAlign: "center",
-  },
-  myTurnIndicator: {
-    color: "#4ade80",
-    fontWeight: "600",
-  },
-  variantName: {
-    color: "#60a5fa",
-    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
-    fontStyle: "italic",
-    textAlign: "center",
-  },
-  bottomBar: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    backgroundColor: "#1a1a1a",
-    paddingVertical: isSmallScreen ? 10 : isTablet ? 16 : 12,
-    paddingHorizontal: horizontalPadding,
-    borderTopWidth: 1,
-    borderTopColor: "#3a3a3a",
-    height: bottomBarHeight,
-  },
-  bottomBarButton: {
-    alignItems: "center",
-    paddingVertical: 8,
-    paddingHorizontal: isSmallScreen ? 8 : isTablet ? 16 : 12,
-    borderRadius: 8,
-    flex: 1,
-  },
-  bottomBarIcon: {
-    fontSize: isSmallScreen ? 18 : isTablet ? 24 : 20,
-    color: "#fff",
-    marginBottom: 4,
-  },
-  bottomBarLabel: {
-    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
-    color: "#a1a1aa",
-    fontWeight: "500",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  moveHistoryModal: {
-    backgroundColor: "#262421",
-    borderRadius: 12,
-    padding: 20,
-    width: "85%",
-    maxHeight: "70%",
-    borderWidth: 1,
-    borderColor: "#3a3a3a",
-  },
-  moveHistoryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  moveHistoryTitle: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 16 : isTablet ? 20 : 18,
-    fontWeight: "bold",
-  },
-  closeButton: {
-    backgroundColor: "#ef4444",
-    padding: 8,
-    borderRadius: 6,
-  },
-  closeButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  moveHistoryScroll: {
-    maxHeight: 300,
-  },
-  moveRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 4,
-  },
-  moveNumber: {
-    color: "#a1a1aa",
-    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
-    width: 30,
-    fontFamily: "monospace",
-  },
-  moveText: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
-    marginRight: 16,
-    fontFamily: "monospace",
-  },
-  promotionModal: {
-    backgroundColor: "#262421",
-    borderRadius: 12,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#3a3a3a",
-  },
-  promotionTitle: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 16 : isTablet ? 20 : 18,
-    fontWeight: "bold",
-    marginBottom: 20,
-  },
-  promotionOptions: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  promotionOption: {
-    backgroundColor: "#4a4a4a",
-    padding: isSmallScreen ? 12 : isTablet ? 20 : 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#60a5fa",
-  },
-  gameEndModal: {
-    backgroundColor: "#262421",
-    borderRadius: 12,
-    padding: 24,
-    alignItems: "center",
-    width: "85%",
-    borderWidth: 2,
-    borderColor: "#3a3a3a",
-  },
-  victoryModal: {
-    borderColor: "#4ade80",
-  },
-  defeatModal: {
-    borderColor: "#ef4444",
-  },
-  gameEndTitle: {
-    fontSize: isSmallScreen ? 20 : isTablet ? 28 : 24,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 16,
-    color: "#fff",
-  },
-  victoryTitle: {
-    color: "#4ade80",
-  },
-  defeatTitle: {
-    color: "#ef4444",
-  },
-  gameEndMessage: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
-    textAlign: "center",
-    marginBottom: 16,
-    lineHeight: 24,
-  },
-  gameEndReason: {
-    color: "#a1a1aa",
-    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
-    marginBottom: 8,
-  },
-  gameEndMove: {
-    color: "#a1a1aa",
-    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
-    marginBottom: 8,
-  },
-  gameEndWinner: {
-    color: "#4ade80",
-    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
-    fontWeight: "bold",
-    marginBottom: 16,
-  },
-  menuButton: {
-    backgroundColor: "#60a5fa",
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  menuButtonText: {
-    color: "#fff",
-    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
-    fontWeight: "600",
-  },
-  coordinateLabel: {
-    position: "absolute",
-    fontWeight: "bold",
-  },
-  rankLabel: {
-    left: 2,
-    top: 2,
-  },
-  fileLabel: {
-    right: 2,
-    bottom: 2,
-  },
-  decayTimerAbove: {
-    position: "absolute",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  decayTimerBox: {
-    backgroundColor: "#f97316",
-    borderRadius: 4,
-    paddingHorizontal: isSmallScreen ? 4 : 6,
-    paddingVertical: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  decayTimerBoxText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontFamily: "monospace",
-  },
-  frozenIndicator: {
-    position: "absolute",
-    top: 2,
-    right: 2,
-    backgroundColor: "#ef4444",
-    borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  frozenText: {
-    // fontSize is set dynamically in renderSquare
-  },
-  possibleMoveDot: {
-    position: "absolute",
-    backgroundColor: "#16a34a",
-    opacity: 0.8,
-  },
-  captureIndicator: {
-    position: "absolute",
-    backgroundColor: "#dc2626",
-    top: 2,
-    right: 2,
-    opacity: 0.9,
-  },
-})

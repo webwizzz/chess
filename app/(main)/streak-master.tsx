@@ -1,91 +1,14 @@
-import axios from 'axios';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, SafeAreaView, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import type { Socket } from "socket.io-client";
 
 import { ClassicChess, CrazyHouseChess, DecayChess } from '../(game)/variants';
 import SixPointerChessGame from '../(game)/variants/six-pointer';
 import { getSocket } from '../../utils/socketManager';
-
-
-
-interface GameState {
-  sessionId: string
-  variantName: string
-  subvariantName?: string
-  description: string
-  players: {
-    white: {
-      userId: string
-      username: string
-      rating: number
-      avatar: string | null
-      title: string | null
-    }
-    black: {
-      userId: string
-      username: string
-      rating: number
-      avatar: string | null
-      title: string | null
-    }
-  }
-  board: {
-    fen: string
-    position: string
-    activeColor: "white" | "black"
-    castlingRights: string
-    enPassantSquare: string
-    halfmoveClock: number
-    fullmoveNumber: number
-    whiteTime?: number
-    blackTime?: number
-    turnStartTimestamp?: number
-    lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
-    pocketedPieces: {
-      white: string[]
-      black: string[]
-    }
-    dropTimers?: {
-      white: { [piece: string]: number }
-      black: { [piece: string]: number }
-    }
-    gameStarted?: boolean
-    firstMoveTimestamp?: number
-    gameEnded?: boolean
-    endReason?: string | null
-    winner?: string | null
-    endTimestamp?: number | null
-  }
-  timeControl: {
-    type: string
-    baseTime: number
-    increment: number
-    timers: {
-      white: number
-      black: number
-    }
-    flagged: {
-      white: boolean
-      black: boolean
-    }
-  }
-  status: string
-  result: string
-  moves: string[]
-  moveCount: number
-  lastMove: string | null
-  gameState: {
-    check: boolean
-    checkmate: boolean
-    stalemate: boolean
-  }
-  userColor: {
-    [key: string]: "white" | "black"
-  }
-}
+import { fetchTournamentLeaderboard } from '../lib/APIservice/service';
+import { streakMasterScreenStyles } from '../lib/styles/screens';
+import { GameState } from '../lib/types/gamestate';
 
 export default function StreakMasterScreen() {
   const router = useRouter();
@@ -286,11 +209,10 @@ export default function StreakMasterScreen() {
   const fetchLeaderboard = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://localhost:3000/api/tournaments');
-      const data = response.data;
-
-      if (data.success) {
-        setLeaderboardData(data.data);
+      const result = await fetchTournamentLeaderboard();
+      
+      if (result.success) {
+        setLeaderboardData(result.data);
       }
     } catch (error) {
       console.error('Failed to fetch leaderboard:', error);
@@ -331,47 +253,47 @@ export default function StreakMasterScreen() {
       case "crazyhouse":
         return <CrazyHouseChess initialGameState={gameState} userId={userId} />
       default:
-        return <Text style={styles.errorText}>Unsupported variant: {matchedVariant}</Text>
+        return <Text style={streakMasterScreenStyles.errorText}>Unsupported variant: {matchedVariant}</Text>
     }
   } else if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={streakMasterScreenStyles.container}>
         <ActivityIndicator size="large" color="#00A862" />
-        <Text style={styles.infoText}>Waiting for match to be established...</Text>
+        <Text style={streakMasterScreenStyles.infoText}>Waiting for match to be established...</Text>
       </View>
     )
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={streakMasterScreenStyles.container}>
       <ScrollView 
-        style={styles.scrollView} 
-        contentContainerStyle={styles.scrollContent}
+        style={streakMasterScreenStyles.scrollView} 
+        contentContainerStyle={streakMasterScreenStyles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>←</Text>
+        <View style={streakMasterScreenStyles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={streakMasterScreenStyles.backButton}>
+            <Text style={streakMasterScreenStyles.backButtonText}>←</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Streak Master</Text>
-          <View style={styles.wallet}>
-            <Text style={styles.walletText}>₹1.00</Text>
+          <Text style={streakMasterScreenStyles.headerTitle}>Streak Master</Text>
+          <View style={streakMasterScreenStyles.wallet}>
+            <Text style={streakMasterScreenStyles.walletText}>₹1.00</Text>
           </View>
         </View>
 
         {/* Victory Rush Card */}
-        <View style={styles.victoryRushCard}>
-          <View style={styles.cardBackground}>
-             <View style={styles.victoryRushContent}>
+        <View style={streakMasterScreenStyles.victoryRushCard}>
+          <View style={streakMasterScreenStyles.cardBackground}>
+             <View style={streakMasterScreenStyles.victoryRushContent}>
               <Image 
                 source={require("../../assets/tl.png")} 
-                style={styles.victoryRushLogo}
+                style={streakMasterScreenStyles.victoryRushLogo}
                 resizeMode="contain"
               />
-              <View style={styles.textContainer}>
-                <Text style={styles.subtitle}>Rack up wins.</Text>
-                <Text style={styles.motivationText}>Keep your streak alive!</Text>
+              <View style={streakMasterScreenStyles.textContainer}>
+                <Text style={streakMasterScreenStyles.subtitle}>Rack up wins.</Text>
+                <Text style={streakMasterScreenStyles.motivationText}>Keep your streak alive!</Text>
               </View>
 
             </View>
@@ -380,50 +302,50 @@ export default function StreakMasterScreen() {
 
         {/* Queue Status */}
         {isTournamentQueueing && (
-          <View style={styles.queueStatusContainer}>
+          <View style={streakMasterScreenStyles.queueStatusContainer}>
             <ActivityIndicator size="large" color="#00A862" />
-            <Text style={styles.queueStatusText}>Searching for match...</Text>
-            <Text style={styles.queueTimerText}>Time in queue: {timer}s</Text>
+            <Text style={streakMasterScreenStyles.queueStatusText}>Searching for match...</Text>
+            <Text style={streakMasterScreenStyles.queueTimerText}>Time in queue: {timer}s</Text>
           </View>
         )}
 
         {/* Match Found Details */}
         {matchDetails && (
-          <View style={styles.matchFoundContainer}>
-            <View style={styles.matchFoundCard}>
-              <Text style={styles.matchFoundTitle}>🎯 Match Found!</Text>
+          <View style={streakMasterScreenStyles.matchFoundContainer}>
+            <View style={streakMasterScreenStyles.matchFoundCard}>
+              <Text style={streakMasterScreenStyles.matchFoundTitle}>🎯 Match Found!</Text>
               
-              <View style={styles.matchDetailsSection}>
-                <View style={styles.opponentSection}>
-                  <Text style={styles.opponentLabel}>Opponent</Text>
-                  <Text style={styles.opponentName}>{matchDetails.opponent}</Text>
+              <View style={streakMasterScreenStyles.matchDetailsSection}>
+                <View style={streakMasterScreenStyles.opponentSection}>
+                  <Text style={streakMasterScreenStyles.opponentLabel}>Opponent</Text>
+                  <Text style={streakMasterScreenStyles.opponentName}>{matchDetails.opponent}</Text>
                 </View>
                 
-                <View style={styles.variantSection}>
-                  <Text style={styles.variantLabel}>Game Mode</Text>
-                  <Text style={styles.variantName}>
+                <View style={streakMasterScreenStyles.variantSection}>
+                  <Text style={streakMasterScreenStyles.variantLabel}>Game Mode</Text>
+                  <Text style={streakMasterScreenStyles.variantName}>
                     {formatVariantName(matchDetails.variant, matchDetails.subvariant)}
                   </Text>
                   {matchDetails.subvariant && (
-                    <Text style={styles.subvariantName}>
+                    <Text style={streakMasterScreenStyles.subvariantName}>
                       {matchDetails.subvariant}
                     </Text>
                   )}
                 </View>
               </View>
               
-              <View style={styles.startingGameSection}>
+              <View style={streakMasterScreenStyles.startingGameSection}>
                 <ActivityIndicator size="small" color="#00A862" />
-                <Text style={styles.startingGameText}>Starting game...</Text>
+                <Text style={streakMasterScreenStyles.startingGameText}>Starting game...</Text>
               </View>
             </View>
           </View>
         )}
 
         {/* How to Win Section */}
-        <View style={styles.rulesContainer}>
-          <Text style={styles.sectionTitle}>How to Win</Text>
-          <View style={styles.rulesCard}>
+        <View style={streakMasterScreenStyles.rulesContainer}>
+          <Text style={streakMasterScreenStyles.sectionTitle}>How to Win</Text>
+          <View style={streakMasterScreenStyles.rulesCard}>
             {[
               "Win or draw games without losing to form a streak",
               "The more games you go unbeaten, the longer your streak",
@@ -431,9 +353,9 @@ export default function StreakMasterScreen() {
               "Your score will be frozen when you lose a game. But don't worry, we will give you another chance if you lose your first game",
               "You should win at least one game to be eligible for prize money"
             ].map((rule, index) => (
-              <View key={index} style={styles.ruleItem}>
-                <View style={styles.ruleBullet} />
-                <Text style={styles.ruleText}>{rule}</Text>
+              <View key={index} style={streakMasterScreenStyles.ruleItem}>
+                <View style={streakMasterScreenStyles.ruleBullet} />
+                <Text style={streakMasterScreenStyles.ruleText}>{rule}</Text>
               </View>
             ))}
           </View>
@@ -441,32 +363,32 @@ export default function StreakMasterScreen() {
         
         {/* Personal Stats */}
         {leaderboardData && (
-          <View style={styles.personalStatsContainer}>
-            <Text style={styles.sectionTitle}>Your Stats</Text>
-            <View style={styles.personalStatsCard}>
+          <View style={streakMasterScreenStyles.personalStatsContainer}>
+            <Text style={streakMasterScreenStyles.sectionTitle}>Your Stats</Text>
+            <View style={streakMasterScreenStyles.personalStatsCard}>
               {(() => {
                 const currentUser = leaderboardData.leaderboard.find((player: any) => player.player.id === userId);
                 return currentUser ? (
-                  <View style={styles.statsGrid}>
-                    <View style={styles.statBox}>
-                      <Text style={styles.statValue}>{currentUser.player.currentTournamentStreak}</Text>
-                      <Text style={styles.statLabel}>Current Streak</Text>
+                  <View style={streakMasterScreenStyles.statsGrid}>
+                    <View style={streakMasterScreenStyles.statBox}>
+                      <Text style={streakMasterScreenStyles.statValue}>{currentUser.player.currentTournamentStreak}</Text>
+                      <Text style={streakMasterScreenStyles.statLabel}>Current Streak</Text>
                     </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statBox}>
-                      <Text style={styles.statValue}>{currentUser.player.personalBestStreak}</Text>
-                      <Text style={styles.statLabel}>Personal Best</Text>
+                    <View style={streakMasterScreenStyles.statDivider} />
+                    <View style={streakMasterScreenStyles.statBox}>
+                      <Text style={streakMasterScreenStyles.statValue}>{currentUser.player.personalBestStreak}</Text>
+                      <Text style={streakMasterScreenStyles.statLabel}>Personal Best</Text>
                     </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statBox}>
-                      <Text style={styles.statValue}>#{currentUser.rank}</Text>
-                      <Text style={styles.statLabel}>Current Rank</Text>
+                    <View style={streakMasterScreenStyles.statDivider} />
+                    <View style={streakMasterScreenStyles.statBox}>
+                      <Text style={streakMasterScreenStyles.statValue}>#{currentUser.rank}</Text>
+                      <Text style={streakMasterScreenStyles.statLabel}>Current Rank</Text>
                     </View>
                   </View>
                 ) : (
-                  <View style={styles.noStatsContainer}>
-                    <Text style={styles.noStatsText}>🎯</Text>
-                    <Text style={styles.noStatsSubtext}>Join tournament to see your stats</Text>
+                  <View style={streakMasterScreenStyles.noStatsContainer}>
+                    <Text style={streakMasterScreenStyles.noStatsText}>🎯</Text>
+                    <Text style={streakMasterScreenStyles.noStatsSubtext}>Join tournament to see your stats</Text>
                   </View>
                 );
               })()}
@@ -475,13 +397,13 @@ export default function StreakMasterScreen() {
         )}
 
         {/* Leaderboard */}
-        <View style={styles.leaderboardContainer}>
-          <Text style={styles.sectionTitle}>Leaderboard</Text>
+        <View style={streakMasterScreenStyles.leaderboardContainer}>
+          <Text style={streakMasterScreenStyles.sectionTitle}>Leaderboard</Text>
           
           {loading ? (
-            <View style={styles.loadingContainer}>
+            <View style={streakMasterScreenStyles.loadingContainer}>
               <ActivityIndicator size="large" color="#00A862" />
-              <Text style={styles.loadingText}>Loading leaderboard...</Text>
+              <Text style={streakMasterScreenStyles.loadingText}>Loading leaderboard...</Text>
             </View>
           ) : leaderboardData ? (
             <View>
@@ -489,71 +411,71 @@ export default function StreakMasterScreen() {
                 <View 
                   key={player.player.id} 
                   style={[
-                    styles.playerCard,
-                    player.player.id === userId && styles.currentPlayerCard
+                    streakMasterScreenStyles.playerCard,
+                    player.player.id === userId && streakMasterScreenStyles.currentPlayerCard
                   ]}
                 >
-                  <View style={styles.playerRow}>
-                    <Text style={styles.playerRank}>#{player.rank}</Text>
-                    <View style={styles.playerDetails}>
+                  <View style={streakMasterScreenStyles.playerRow}>
+                    <Text style={streakMasterScreenStyles.playerRank}>#{player.rank}</Text>
+                    <View style={streakMasterScreenStyles.playerDetails}>
                       <Text style={[
-                        styles.playerName,
-                        player.player.id === userId && styles.currentPlayerName
+                        streakMasterScreenStyles.playerName,
+                        player.player.id === userId && streakMasterScreenStyles.currentPlayerName
                       ]}>
                         {player.player.name}
                         {player.player.id === userId && (
-                          <Text style={styles.youIndicator}> (You)</Text>
+                          <Text style={streakMasterScreenStyles.youIndicator}> (You)</Text>
                         )}
                       </Text>
                     </View>
-                    <Text style={styles.playerStreak}>{player.player.currentTournamentStreak}</Text>
+                    <Text style={streakMasterScreenStyles.playerStreak}>{player.player.currentTournamentStreak}</Text>
                   </View>
                 </View>
               ))}
               
-              <View style={styles.tournamentInfo}>
-                <Text style={styles.tournamentName}>{leaderboardData.tournament.name}</Text>
-                <Text style={styles.participantCount}>
+              <View style={streakMasterScreenStyles.tournamentInfo}>
+                <Text style={streakMasterScreenStyles.tournamentName}>{leaderboardData.tournament.name}</Text>
+                <Text style={streakMasterScreenStyles.participantCount}>
                   {leaderboardData.tournament.totalParticipants} participants
                 </Text>
               </View>
             </View>
           ) : (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorEmoji}>⚠️</Text>
-              <Text style={styles.errorText}>Failed to load leaderboard</Text>
-              <TouchableOpacity onPress={fetchLeaderboard} style={styles.retryButton}>
-                <Text style={styles.retryButtonText}>Try Again</Text>
+            <View style={streakMasterScreenStyles.errorContainer}>
+              <Text style={streakMasterScreenStyles.errorEmoji}>⚠️</Text>
+              <Text style={streakMasterScreenStyles.errorText}>Failed to load leaderboard</Text>
+              <TouchableOpacity onPress={fetchLeaderboard} style={streakMasterScreenStyles.retryButton}>
+                <Text style={streakMasterScreenStyles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
             </View>
           )}
         </View>
         
-        <View style={styles.bottomPadding} />
+        <View style={streakMasterScreenStyles.bottomPadding} />
       </ScrollView>
 
       {/* Fixed Bottom Section */}
-      <View style={styles.bottomContainer}>
+      <View style={streakMasterScreenStyles.bottomContainer}>
         <TouchableOpacity 
           style={[
-            styles.playButton, 
-            (isConnecting || tournamentStatus !== 'idle') && styles.playButtonDisabled
+            streakMasterScreenStyles.playButton, 
+            (isConnecting || tournamentStatus !== 'idle') && streakMasterScreenStyles.playButtonDisabled
           ]}
           onPress={tournamentStatus === 'idle' ? handlePlayNow : handleLeaveTournament}
           disabled={tournamentStatus === 'matched'}
           activeOpacity={0.8}
         >
           {isConnecting || tournamentStatus !== 'idle' ? (
-            <View style={styles.loadingButtonContent}>
+            <View style={streakMasterScreenStyles.loadingButtonContent}>
               <ActivityIndicator size="small" color="#000000" />
-              <Text style={styles.playButtonText}>
+              <Text style={streakMasterScreenStyles.playButtonText}>
                 {tournamentStatus === 'joining' ? 'Connecting...' : 
                  tournamentStatus === 'queuing' ? `Finding Match (${timer}s)` :
                  matchDetails ? 'Starting Game...' : 'Match Found!'}
               </Text>
             </View>
           ) : (
-            <Text style={styles.playButtonText}>Play Now</Text>
+            <Text style={streakMasterScreenStyles.playButtonText}>Play Now</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -561,521 +483,3 @@ export default function StreakMasterScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#1C1C1E',
-  },
-  infoText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginTop: 16,
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 20,
-  },
-
-  // Header
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingTop: 60,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  wallet: {
-    backgroundColor: '#2C2C2E',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 168, 98, 0.3)', // Changed from yellow to green
-    minWidth: 80,
-    alignItems: 'center',
-  },
-  walletText: {
-    color: '#00A862', // Changed from yellow to green
-    fontSize: 16,
-    fontWeight: '700',
-  },
-
-  // Victory Rush Card
-  victoryRushCard: {
-    marginHorizontal: 20,
-    marginVertical: 20,
-    borderRadius: 25,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-  },
-  cardBackground: {
-    backgroundColor: '#69923e',
-    position: 'relative',
-  },
-  victoryRushContent: {
-    padding: 24,
-    alignItems: 'center',
-    minHeight: 240,
-  },
-  victoryRushLogo: {
-    position: 'absolute',
-    top: -50,
-    width: '120%',
-    height: 200,
-    zIndex: 1,
-  },
-  textContainer: {
-    alignItems: 'center',
-    paddingTop: 100,
-    marginBottom: 24,
-    zIndex: 2,
-  },
-  subtitle: {
-    color: '#FFF5E1',
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 8,
-    textAlign: 'center',
-    letterSpacing: 0.5,
-  },
-  motivationText: {
-    color: '#FFF5E1',
-    fontSize: 16,
-    opacity: 0.9,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  progressSection: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  progressBar: {
-    width: '90%',
-    height: 8,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 4,
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    width: '43%',
-    height: '100%',
-    backgroundColor: '#32D74B',
-    borderRadius: 4,
-  },
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '90%',
-  },
-  spotsLeft: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  totalSpots: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  // Section Titles
-  sectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 16,
-    letterSpacing: 0.5,
-  },
-
-  // Rules Section
-  rulesContainer: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-  },
-  rulesCard: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 20,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  ruleItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  ruleBullet: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#00A862', // Changed from yellow to green
-    marginRight: 16,
-    marginTop: 8,
-    flexShrink: 0,
-  },
-  ruleText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    lineHeight: 24,
-    flex: 1,
-  },
-
-  // Personal Stats
-  personalStatsContainer: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-  },
-  personalStatsCard: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 20,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 168, 98, 0.2)', // Changed from yellow to green
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statBox: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  statValue: {
-    color: '#00A862', // Changed from yellow to green
-    fontSize: 28,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  statLabel: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 13,
-    fontWeight: '500',
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-  statDivider: {
-    width: 1,
-    height: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    marginHorizontal: 16,
-  },
-  noStatsContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  noStatsText: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  noStatsSubtext: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-
-  // Leaderboard
-  leaderboardContainer: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-  },
-  playerCard: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  currentPlayerCard: {
-    backgroundColor: 'rgba(0, 168, 98, 0.1)',
-    borderColor: '#00A862',
-  },
-  playerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  playerRank: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
-    fontWeight: '600',
-    width: 40,
-  },
-  playerDetails: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  playerName: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  currentPlayerName: {
-    color: '#00A862',
-    fontWeight: '700',
-  },
-  youIndicator: {
-    color: '#00A862',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  playerStreak: {
-    color: '#00A862',
-    fontSize: 16,
-    fontWeight: '700',
-    minWidth: 40,
-    textAlign: 'center',
-  },
-  tournamentInfo: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  tournamentName: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  participantCount: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-
-  // Loading and Error States
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginTop: 12,
-    fontWeight: '500',
-  },
-  errorContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  errorEmoji: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  errorText: {
-    color: '#FF6B6B',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 16,
-    fontWeight: '500',
-  },
-  retryButton: {
-    backgroundColor: '#00A862', // Changed from yellow to green
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 20,
-  },
-  retryButtonText: {
-    color: '#000000',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-
-  // Bottom Container
-  bottomContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    paddingBottom: 40,
-    backgroundColor: '#1C1C1E',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  playButton: {
-    backgroundColor: '#00A862', // Changed from yellow to green
-    paddingVertical: 18,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginBottom: 12,
-    elevation: 6,
-    shadowColor: '#00A862', // Changed from yellow to green
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-  },
-  playButtonDisabled: {
-    opacity: 0.7,
-  },
-  loadingButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  playButtonText: {
-    color: '#000000',
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginLeft: 8,
-  },
-  timerText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    letterSpacing: 0.5,
-  },
-  bottomPadding: {
-    height: 140,
-  },
-
-  // Queue Status
-  queueStatusContainer: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 20,
-    padding: 24,
-    marginHorizontal: 20,
-    marginBottom: 24,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 168, 98, 0.3)',
-  },
-  queueStatusText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  queueTimerText: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  matchFoundText: {
-    color: '#00A862',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 12,
-    textAlign: 'center',
-  },
-
-  // Match Found Styles
-  matchFoundContainer: {
-    marginHorizontal: 20,
-    marginBottom: 24,
-  },
-  matchFoundCard: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 20,
-    padding: 24,
-    borderWidth: 2,
-    borderColor: '#00A862',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#00A862',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  matchFoundTitle: {
-    color: '#00A862',
-    fontSize: 24,
-    fontWeight: '800',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  matchDetailsSection: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  opponentSection: {
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  opponentLabel: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  opponentName: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  variantSection: {
-    alignItems: 'center',
-  },
-  variantLabel: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  variantName: {
-    color: '#00A862',
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  subvariantName: {
-    color: 'rgba(0, 168, 98, 0.8)',
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  startingGameSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  startingGameText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-});

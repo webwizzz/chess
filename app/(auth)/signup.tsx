@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Image, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { registerUser } from "../lib/APIservice/service";
 
 export default function Signup() {
   const router = useRouter();
@@ -17,22 +17,18 @@ export default function Signup() {
       return;
     }
     try {
-      const response = await axios.post('http://localhost:3000/api/auth/register', {
-        name,
-        email,
-        password
-      });
-      if (response.status === 201) {
-        const data = response.data;
+      const result = await registerUser(name, email, password);
+      
+      if (result.success) {
+        const data = result.data;
         await AsyncStorage.setItem('token', data.token);
         await AsyncStorage.setItem('user', JSON.stringify(data.user));
         router.replace('/(main)/choose');
       } else {
-        alert(response.data.error || 'Registration failed');
+        alert(result.error);
       }
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.error || 'An error occurred. Please try again.';
-      alert(errorMsg);
+    } catch (err) {
+      alert('An unexpected error occurred. Please try again.');
     }
   };
 

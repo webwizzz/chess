@@ -3,125 +3,12 @@
 import { getSocketInstance } from "@/utils/socketManager"
 import { useRouter } from "expo-router"
 import { useEffect, useRef, useState } from "react"
-import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
+import { Alert, Dimensions, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
-// Removed GameControls import as it's no longer needed
+import { sixPointerStyles } from "@/app/lib/styles"
+import { Move, GameState, SixPointerChessGameProps } from "@/app/lib/types/sixpointer"
 
-// Types
-interface Player {
-  userId: string
-  username: string
-  rating: number
-  avatar: string | null
-  title: string | null
-}
 
-interface GameState {
-  sessionId: string
-  variantName: string
-  subvariantName?: string
-  description: string
-  players: {
-    white: Player
-    black: Player
-  }
-  board: {
-    fen: string
-    position: string
-    activeColor: "white" | "black"
-    castlingRights: string
-    enPassantSquare: string
-    halfmoveClock: number
-    fullmoveNumber: number
-    whiteTime?: number
-    blackTime?: number
-    turnStartTimestamp?: number
-    lastMoveTimestamp?: number
-    moveHistory?: { from: string; to: string; [key: string]: any }[]
-    repetitionMap?: any
-    gameStarted?: boolean
-    firstMoveTimestamp?: number
-    capturedPieces?: {
-      white: string[]
-      black: string[]
-    }
-  }
-  timeControl: {
-    type: string
-    baseTime: number
-    increment: number
-    timers: {
-      white: number
-      black: number
-    }
-    flagged: {
-      white: boolean
-      black: boolean
-    }
-    timeSpent?: { white: any; black: any }
-  }
-  status: string
-  result: string
-  resultReason?: string | null
-  winner?: string | null
-  moves: any[]
-  moveCount: number
-  lastMove: any
-  gameState: {
-    valid?: boolean
-    move?: any
-    state?: any
-    result?: string
-    check?: boolean
-    checkmate?: boolean
-    stalemate?: boolean
-    insufficientMaterial?: boolean
-    threefoldRepetition?: boolean
-    fiftyMoveRule?: boolean
-    canCastleKingside?: { white?: boolean; black?: boolean }
-    canCastleQueenside?: { white?: boolean; black?: boolean }
-    promotionAvailable?: boolean
-    lastMove?: any
-    winner?: string | null
-    drawReason?: string | null
-    gameEnded?: boolean
-    endReason?: string | null
-    endTimestamp?: number
-    // 6PT Chess specific
-    movesPlayed?: { white: number; black: number }
-    maxMoves?: number
-    points?: { white: number; black: number }
-    variant?: string
-  }
-  userColor: {
-    [key: string]: "white" | "black"
-  }
-  positionHistory?: string[]
-  createdAt?: number
-  lastActivity?: number
-  startedAt?: number
-  endedAt?: number | null
-  rules?: any
-  metadata?: any
-  timers?: any
-  // 6PT Chess specific fields
-  movesPlayed?: { white: number; black: number }
-  maxMoves?: number
-  points?: { white: number; black: number }
-  variant?: string
-}
-
-interface Move {
-  from: string
-  to: string
-  promotion?: string
-}
-
-interface SixPointerChessGameProps {
-  initialGameState: GameState
-  userId: string
-  onNavigateToMenu?: () => void
-}
 
 const PIECE_SYMBOLS = {
   r: "♜",
@@ -1083,11 +970,11 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     })
 
     return (
-      <View style={styles.capturedPieces}>
+      <View style={sixPointerStyles.capturedPieces}>
         {Object.entries(pieceCounts).map(([piece, count]) => (
-          <View key={piece} style={styles.capturedPieceGroup}>
-            <Text style={styles.capturedPiece}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>
-            {count > 1 && <Text style={styles.capturedCount}>{count}</Text>}
+          <View key={piece} style={sixPointerStyles.capturedPieceGroup}>
+            <Text style={sixPointerStyles.capturedPiece}>{PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}</Text>
+            {count > 1 && <Text style={sixPointerStyles.capturedCount}>{count}</Text>}
           </View>
         ))}
       </View>
@@ -1123,23 +1010,23 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       <TouchableOpacity
         key={square}
         style={[
-          styles.square,
+          sixPointerStyles.square,
           {
             width: squareSize,
             height: squareSize,
             backgroundColor: isLight ? "#F0D9B5" : "#769656", // Exact Chess.com colors
           },
-          isLastMove && styles.lastMoveSquare,
-          isSelected && styles.selectedSquare,
-          isPossibleMove && !isCapture && styles.possibleMoveSquare,
-          isCapture && styles.captureMoveSquare,
+          isLastMove && sixPointerStyles.lastMoveSquare,
+          isSelected && sixPointerStyles.selectedSquare,
+          isPossibleMove && !isCapture && sixPointerStyles.possibleMoveSquare,
+          isCapture && sixPointerStyles.captureMoveSquare,
         ]}
         onPress={() => handleSquarePress(square)}
       >
         {piece && (
           <Text
             style={[
-              styles.piece,
+              sixPointerStyles.piece,
               {
                 fontSize: fontSizes.piece,
               },
@@ -1148,8 +1035,8 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
             {PIECE_SYMBOLS[piece as keyof typeof PIECE_SYMBOLS]}
           </Text>
         )}
-        {isPossibleMove && !piece && <View style={styles.possibleMoveDot} />}
-        {isPossibleMove && piece && <View style={styles.captureIndicator} />}
+        {isPossibleMove && !piece && <View style={sixPointerStyles.possibleMoveDot} />}
+        {isPossibleMove && piece && <View style={sixPointerStyles.captureIndicator} />}
       </TouchableOpacity>
     )
   }
@@ -1161,19 +1048,19 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     return (
       <>
         {/* File coordinates (a-h) at bottom */}
-        <View style={styles.fileCoordinates}>
+        <View style={sixPointerStyles.fileCoordinates}>
           {files.map((file, index) => (
             <View key={file} style={{ width: squareSize, alignItems: "center" }}>
-              <Text style={styles.coordinateText}>{file}</Text>
+              <Text style={sixPointerStyles.coordinateText}>{file}</Text>
             </View>
           ))}
         </View>
 
         {/* Rank coordinates (1-8) on right side */}
-        <View style={styles.rankCoordinates}>
+        <View style={sixPointerStyles.rankCoordinates}>
           {ranks.map((rank, index) => (
             <View key={rank} style={{ height: squareSize, justifyContent: "center" }}>
-              <Text style={styles.coordinateText}>{rank}</Text>
+              <Text style={sixPointerStyles.coordinateText}>{rank}</Text>
             </View>
           ))}
         </View>
@@ -1186,11 +1073,11 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
-      <View style={styles.boardContainer}>
-        <View style={styles.boardWrapper}>
+      <View style={sixPointerStyles.boardContainer}>
+        <View style={sixPointerStyles.boardWrapper}>
           <View
             style={[
-              styles.board,
+              sixPointerStyles.board,
               {
                 width: boardSize,
                 height: boardSize,
@@ -1198,7 +1085,7 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
             ]}
           >
             {ranks.map((rank) => (
-              <View key={rank} style={styles.row}>
+              <View key={rank} style={sixPointerStyles.row}>
                 {files.map((file) => renderSquare(file, rank))}
               </View>
             ))}
@@ -1219,14 +1106,14 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
       const displayMoveNumber = isMoveMade ? (i + 1).toString() : "" // Display 1, 2, 3...
 
       indicators.push(
-        <View key={i} style={[styles.moveSquare, isMoveMade ? styles.filledMoveSquare : styles.emptyMoveSquare]}>
-          <Text style={[styles.moveNumberInBox, isMoveMade ? styles.filledMoveNumberText : styles.emptyMoveNumberText]}>
+        <View key={i} style={[sixPointerStyles.moveSquare, isMoveMade ? sixPointerStyles.filledMoveSquare : sixPointerStyles.emptyMoveSquare]}>
+          <Text style={[sixPointerStyles.moveNumberInBox, isMoveMade ? sixPointerStyles.filledMoveNumberText : sixPointerStyles.emptyMoveNumberText]}>
             {displayMoveNumber}
           </Text>
         </View>,
       )
     }
-    return <View style={styles.movesLeftContainer}>{indicators}</View>
+    return <View style={sixPointerStyles.movesLeftContainer}>{indicators}</View>
   }
 
   const renderPlayerInfo = (color: "white" | "black", isTop: boolean) => {
@@ -1240,29 +1127,29 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     const currentPoints = getPoints()[color]
 
     return (
-      <View style={[styles.playerInfoBlock, isTop ? styles.topPlayerBlock : styles.bottomPlayerBlock]}>
-        <View style={styles.playerInfoLeft}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
+      <View style={[sixPointerStyles.playerInfoBlock, isTop ? sixPointerStyles.topPlayerBlock : sixPointerStyles.bottomPlayerBlock]}>
+        <View style={sixPointerStyles.playerInfoLeft}>
+          <View style={sixPointerStyles.avatarContainer}>
+            <View style={sixPointerStyles.avatar}>
+              <Text style={sixPointerStyles.avatarText}>{player.username.charAt(0).toUpperCase()}</Text>
             </View>
-            <View style={styles.pointsCircle}>
-              <Text style={styles.pointsText}>{currentPoints}</Text>
+            <View style={sixPointerStyles.pointsCircle}>
+              <Text style={sixPointerStyles.pointsText}>{currentPoints}</Text>
             </View>
           </View>
-          <View style={styles.playerDetails}>
-            <Text style={styles.playerName}>
-              {player.username} {isMe && <Text style={styles.youIndicator}>YOU</Text>}
+          <View style={sixPointerStyles.playerDetails}>
+            <Text style={sixPointerStyles.playerName}>
+              {player.username} {isMe && <Text style={sixPointerStyles.youIndicator}>YOU</Text>}
             </Text>
-            <Text style={styles.playerRating}>({player.rating})</Text>
+            <Text style={sixPointerStyles.playerRating}>({player.rating})</Text>
             {/* ADD THIS LINE to display captured pieces */}
             {renderCapturedPieces(color)}
           </View>
         </View>
 
-        <View style={styles.playerInfoRight}>
-          <View style={[styles.timerContainer, isActivePlayer && styles.activeTimer]}>
-            <Text style={[styles.timer, { fontSize: fontSizes.timer }]}>{formatTime(timer)}</Text>
+        <View style={sixPointerStyles.playerInfoRight}>
+          <View style={[sixPointerStyles.timerContainer, isActivePlayer && sixPointerStyles.activeTimer]}>
+            <Text style={[sixPointerStyles.timer, { fontSize: fontSizes.timer }]}>{formatTime(timer)}</Text>
           </View>
         </View>
       </View>
@@ -1284,20 +1171,20 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
 
     return (
       <Modal visible={showMoveHistory} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.moveHistoryModal}>
-            <View style={styles.moveHistoryHeader}>
-              <Text style={styles.moveHistoryTitle}>Moves</Text>
-              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>✕</Text>
+        <View style={sixPointerStyles.modalOverlay}>
+          <View style={sixPointerStyles.moveHistoryModal}>
+            <View style={sixPointerStyles.moveHistoryHeader}>
+              <Text style={sixPointerStyles.moveHistoryTitle}>Moves</Text>
+              <TouchableOpacity onPress={() => setShowMoveHistory(false)} style={sixPointerStyles.closeButton}>
+                <Text style={sixPointerStyles.closeButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.moveHistoryScroll}>
+            <ScrollView style={sixPointerStyles.moveHistoryScroll}>
               {movePairs.map((pair, index) => (
-                <View key={index} style={styles.moveRow}>
-                  <Text style={styles.moveNumber}>{pair.moveNumber}.</Text>
-                  <Text style={styles.moveText}>{pair.black}</Text>
-                  <Text style={styles.moveText}>{pair.white}</Text>
+                <View key={index} style={sixPointerStyles.moveRow}>
+                  <Text style={sixPointerStyles.moveNumber}>{pair.moveNumber}.</Text>
+                  <Text style={sixPointerStyles.moveText}>{pair.black}</Text>
+                  <Text style={sixPointerStyles.moveText}>{pair.white}</Text>
                 </View>
               ))}
             </ScrollView>
@@ -1314,56 +1201,56 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
   const opponentColor = playerColor === "white" ? "black" : "white"
 
   return (
-    <View style={styles.container}>
+    <View style={sixPointerStyles.container}>
       {/* Top Player Info Block */}
       {renderPlayerInfo(opponentColor, true)}
 
       {/* Top Moves Left Indicators */}
-      {isSixPointer && <View style={styles.movesLeftRowWrapperTop}>{renderMovesLeftIndicators(opponentColor)}</View>}
+      {isSixPointer && <View style={sixPointerStyles.movesLeftRowWrapperTop}>{renderMovesLeftIndicators(opponentColor)}</View>}
 
       {/* Chess Board */}
       {renderBoard()}
 
       {/* Bottom Moves Left Indicators */}
-      {isSixPointer && <View style={styles.movesLeftRowWrapperBottom}>{renderMovesLeftIndicators(playerColor)}</View>}
+      {isSixPointer && <View style={sixPointerStyles.movesLeftRowWrapperBottom}>{renderMovesLeftIndicators(playerColor)}</View>}
 
       {/* Bottom Player Info Block */}
       {renderPlayerInfo(playerColor, false)}
 
       {/* Bottom Control Bar */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
-          <Text style={styles.bottomBarIcon}>≡</Text>
-          <Text style={styles.bottomBarLabel}>Moves</Text>
+      <View style={sixPointerStyles.bottomBar}>
+        <TouchableOpacity style={sixPointerStyles.bottomBarButton} onPress={() => setShowMoveHistory(true)}>
+          <Text style={sixPointerStyles.bottomBarIcon}>≡</Text>
+          <Text style={sixPointerStyles.bottomBarLabel}>Moves</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.bottomBarButton} onPress={handleFlipBoard}>
-          <Text style={styles.bottomBarIcon}>⟲</Text>
-          <Text style={styles.bottomBarLabel}>Flip</Text>
+        <TouchableOpacity style={sixPointerStyles.bottomBarButton} onPress={handleFlipBoard}>
+          <Text style={sixPointerStyles.bottomBarIcon}>⟲</Text>
+          <Text style={sixPointerStyles.bottomBarLabel}>Flip</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={sixPointerStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") {
               socket.emit("game:resign")
             }
           }}
         >
-          <Text style={styles.bottomBarIcon}>✕</Text>
-          <Text style={styles.bottomBarLabel}>Resign</Text>
+          <Text style={sixPointerStyles.bottomBarIcon}>✕</Text>
+          <Text style={sixPointerStyles.bottomBarLabel}>Resign</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.bottomBarButton}
+          style={sixPointerStyles.bottomBarButton}
           onPress={() => {
             if (socket && gameState.status === "active") {
               socket.emit("game:offerDraw")
             }
           }}
         >
-          <Text style={styles.bottomBarIcon}>½</Text>
-          <Text style={styles.bottomBarLabel}>Draw</Text>
+          <Text style={sixPointerStyles.bottomBarIcon}>½</Text>
+          <Text style={sixPointerStyles.bottomBarLabel}>Draw</Text>
         </TouchableOpacity>
       </View>
 
@@ -1372,45 +1259,45 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
 
       {/* Game End Modal */}
       <Modal visible={showGameEndModal} transparent animationType="fade" onRequestClose={() => {}}>
-        <View style={styles.modalOverlay}>
+        <View style={sixPointerStyles.modalOverlay}>
           <View
             style={[
-              styles.gameEndModal,
-              isWinner === true && styles.victoryModal,
-              isWinner === false && styles.defeatModal,
+              sixPointerStyles.gameEndModal,
+              isWinner === true && sixPointerStyles.victoryModal,
+              isWinner === false && sixPointerStyles.defeatModal,
             ]}
           >
             <Text
               style={[
-                styles.gameEndTitle,
-                isWinner === true && styles.victoryTitle,
-                isWinner === false && styles.defeatTitle,
+                sixPointerStyles.gameEndTitle,
+                isWinner === true && sixPointerStyles.victoryTitle,
+                isWinner === false && sixPointerStyles.defeatTitle,
               ]}
             >
               {isWinner === true ? "🎉 VICTORY! 🎉" : isWinner === false ? "😔 DEFEAT 😔" : "🏁 GAME OVER 🏁"}
             </Text>
-            <Text style={styles.gameEndMessage}>{gameEndMessage}</Text>
+            <Text style={sixPointerStyles.gameEndMessage}>{gameEndMessage}</Text>
             {/* Show extra details if available */}
             {(gameEndDetails.reason ||
               gameEndDetails.moveSan ||
               gameEndDetails.winner ||
               gameEndDetails.finalPoints) && (
-              <View style={styles.gameEndDetailsContainer}>
-                {gameEndDetails.reason && <Text style={styles.gameEndDetailText}>Reason: {gameEndDetails.reason}</Text>}
+              <View style={sixPointerStyles.gameEndDetailsContainer}>
+                {gameEndDetails.reason && <Text style={sixPointerStyles.gameEndDetailText}>Reason: {gameEndDetails.reason}</Text>}
                 {gameEndDetails.moveSan && (
-                  <Text style={styles.gameEndDetailText}>
+                  <Text style={sixPointerStyles.gameEndDetailText}>
                     Move: {gameEndDetails.moveSan}
                     {gameEndDetails.moveMaker ? ` by ${gameEndDetails.moveMaker}` : ""}
                   </Text>
                 )}
                 {gameEndDetails.winner && (
-                  <Text style={styles.gameEndDetailText}>
+                  <Text style={sixPointerStyles.gameEndDetailText}>
                     Winner: {gameEndDetails.winner}
                     {gameEndDetails.winnerName ? ` (${gameEndDetails.winnerName})` : ""}
                   </Text>
                 )}
                 {gameEndDetails.finalPoints && (
-                  <Text style={styles.gameEndDetailText}>
+                  <Text style={sixPointerStyles.gameEndDetailText}>
                     Final Score: {gameEndDetails.finalPoints.white} - {gameEndDetails.finalPoints.black}
                   </Text>
                 )}
@@ -1427,14 +1314,14 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
         animationType="fade"
         onRequestClose={() => setPromotionModal(null)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.promotionModal}>
-            <Text style={styles.promotionTitle}>👑 Choose Promotion Piece</Text>
-            <View style={styles.promotionOptions}>
+        <View style={sixPointerStyles.modalOverlay}>
+          <View style={sixPointerStyles.promotionModal}>
+            <Text style={sixPointerStyles.promotionTitle}>👑 Choose Promotion Piece</Text>
+            <View style={sixPointerStyles.promotionOptions}>
               {promotionModal &&
                 promotionModal.options.map((p) => (
-                  <TouchableOpacity key={p} style={styles.promotionOption} onPress={() => handlePromotionSelect(p)}>
-                    <Text style={styles.promotionPiece}>
+                  <TouchableOpacity key={p} style={sixPointerStyles.promotionOption} onPress={() => handlePromotionSelect(p)}>
+                    <Text style={sixPointerStyles.promotionPiece}>
                       {
                         PIECE_SYMBOLS[
                           (playerColor === "white" ? p.toUpperCase() : p.toLowerCase()) as keyof typeof PIECE_SYMBOLS
@@ -1444,8 +1331,8 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
                   </TouchableOpacity>
                 ))}
             </View>
-            <TouchableOpacity onPress={() => setPromotionModal(null)} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+            <TouchableOpacity onPress={() => setPromotionModal(null)} style={sixPointerStyles.cancelButton}>
+              <Text style={sixPointerStyles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1453,438 +1340,3 @@ export default function SixPointerChessGame({ initialGameState, userId, onNaviga
     </View>
   )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#2c2c2c", // Chess.com dark background
-    justifyContent: "space-between", // Distribute content vertically
-    alignItems: "center",
-  },
-  playerInfoBlock: {
-    width: "100%",
-    backgroundColor: "#2c2c2c", // Match overall background
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#3a3a3a", // Subtle separator
-  },
-  topPlayerBlock: {
-    paddingTop: 20, // Account for status bar
-  },
-  bottomPlayerBlock: {
-    borderTopWidth: 1,
-    borderBottomWidth: 0,
-    borderTopColor: "#3a3a3a",
-    paddingBottom: 20, // Account for bottom safe area
-  },
-  playerInfoLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  avatarContainer: {
-    position: "relative",
-    marginRight: 12,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    backgroundColor: "#666",
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  avatarText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  pointsCircle: {
-    position: "absolute",
-    bottom: -5,
-    right: -5,
-    backgroundColor: "#4a4a4a", // Darker gray for points circle
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#2c2c2c", // Match background
-  },
-  pointsText: {
-    color: "#fff",
-    fontSize: fontSizes.points, // Ensure this uses the correct font size for points
-    fontWeight: "bold",
-  },
-  playerDetails: {
-    flex: 1,
-  },
-  playerName: {
-    color: "#fff",
-    fontSize: fontSizes.username,
-    fontWeight: "500",
-  },
-  youIndicator: {
-    color: "#90EE90", // Green for "YOU"
-    fontSize: fontSizes.rating,
-    fontWeight: "bold",
-    marginLeft: 5,
-  },
-  playerRating: {
-    color: "#999",
-    fontSize: fontSizes.rating,
-  },
-  playerInfoRight: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  timerContainer: {
-    backgroundColor: "#1a1a1a",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    minWidth: 70,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#3a3a3a",
-  },
-  activeTimer: {
-    borderColor: "#90EE90", // Green border for active timer
-  },
-  timer: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontFamily: "monospace",
-  },
-  // New styles for positioning the moves left indicators
-  movesLeftRowWrapperTop: {
-    width: "100%",
-    alignItems: "flex-end", // Aligns the row of boxes to the right
-    paddingHorizontal: 16, // Matches player info padding
-    paddingBottom: 8, // Space between indicators and board
-  },
-  movesLeftRowWrapperBottom: {
-    width: "100%",
-    alignItems: "flex-end", // Aligns the row of boxes to the right
-    paddingHorizontal: 16, // Matches player info padding
-    paddingTop: 8, // Space between indicators and board
-  },
-  movesLeftContainer: {
-    flexDirection: "row",
-    // Removed justifyContent: "center" as alignment is handled by parent wrapper
-    paddingVertical: 4,
-    backgroundColor: "rgba(0,0,0,0.2)",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-  },
-  moveSquare: {
-    width: 20, // Increased size for number
-    height: 20, // Increased size for number
-    borderRadius: 4, // Slightly larger border radius
-    marginHorizontal: 3, // Adjusted margin
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1, // Add border for definition
-    borderColor: "#666", // Default border color
-  },
-  filledMoveSquare: {
-    backgroundColor: "#90EE90", // Green for filled moves
-    borderColor: "#90EE90", // Green border for filled moves
-  },
-  emptyMoveSquare: {
-    backgroundColor: "#4a4a4a", // Darker gray for empty moves
-    borderColor: "#666", // Gray border for empty moves
-  },
-  moveNumberInBox: {
-    fontSize: fontSizes.moveNumberInBox, // Use the new font size
-    fontWeight: "bold",
-  },
-  filledMoveNumberText: {
-    color: "#000", // Black text for green boxes
-  },
-  emptyMoveNumberText: {
-    color: "#999", // Gray text for empty boxes
-  },
-  boardContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    // Removed flex: 1 and width: "100%" here as it's now managed by the main container's flex
-  },
-  boardWrapper: {
-    position: "relative",
-  },
-  board: {
-    borderRadius: 0, // No border radius for full-width board
-  },
-  fileCoordinates: {
-    flexDirection: "row",
-    position: "absolute",
-    bottom: -20,
-    left: 0,
-  },
-  rankCoordinates: {
-    position: "absolute",
-    right: -20,
-    top: 0,
-  },
-  coordinateText: {
-    color: "#999",
-    fontSize: fontSizes.coordinates,
-    fontWeight: "500",
-  },
-  row: {
-    flexDirection: "row",
-  },
-  square: {
-    justifyContent: "center",
-    alignItems: "center",
-    position: "relative",
-  },
-  lastMoveSquare: {
-    backgroundColor: "#f7ec74", // Chess.com last move highlight
-  },
-  selectedSquare: {
-    backgroundColor: "#f7ec74", // Same as last move for consistency
-  },
-  possibleMoveSquare: {
-    backgroundColor: "rgba(255, 255, 0, 0.3)", // Subtle highlight for possible moves
-  },
-  captureMoveSquare: {
-    backgroundColor: "rgba(255, 0, 0, 0.3)", // Red tint for captures
-  },
-  piece: {
-    fontWeight: "bold",
-    color: "#000",
-    textShadowColor: "rgba(255,255,255,0.3)",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
-  possibleMoveDot: {
-    position: "absolute",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "rgba(0, 0, 0, 0.3)",
-    opacity: 0.8,
-  },
-  captureIndicator: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 16,
-    borderTopWidth: 16,
-    borderLeftColor: "transparent",
-    borderTopColor: "rgba(255, 0, 0, 0.3)", // Red tint for captures
-  },
-  bottomBar: {
-    flexDirection: "row",
-    backgroundColor: "#1a1a1a",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    justifyContent: "space-around",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#333",
-    width: "100%",
-  },
-  bottomBarButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    minWidth: 60,
-  },
-  bottomBarIcon: {
-    fontSize: 24,
-    marginBottom: 4,
-    color: "#999", // Professional gray color that matches the theme
-    fontWeight: "bold",
-  },
-  bottomBarLabel: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 16,
-  },
-  moveHistoryModal: {
-    backgroundColor: "#2c2c2c",
-    borderRadius: 12,
-    width: "90%",
-    maxWidth: 400,
-    maxHeight: "70%",
-    borderWidth: 1,
-    borderColor: "#555",
-  },
-  moveHistoryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#555",
-  },
-  moveHistoryTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  closeButton: {
-    padding: 8,
-  },
-  closeButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  moveHistoryScroll: {
-    flex: 1,
-    padding: 16,
-  },
-  moveRow: {
-    flexDirection: "row",
-    marginBottom: 8,
-    alignItems: "center",
-  },
-  moveNumber: {
-    color: "#999",
-    fontSize: 14,
-    width: 30,
-    fontWeight: "bold",
-  },
-  moveText: {
-    color: "#fff",
-    fontSize: 14,
-    width: 60,
-    marginHorizontal: 8,
-  },
-  gameEndModal: {
-    backgroundColor: "#2c2c2c",
-    borderRadius: 16,
-    padding: 24,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-    maxWidth: "90%",
-  },
-  victoryModal: {
-    borderColor: "#90EE90", // Green for victory
-  },
-  defeatModal: {
-    borderColor: "#FF6B6B", // Red for defeat
-  },
-  gameEndTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 16,
-    color: "#fff",
-  },
-  victoryTitle: {
-    color: "#90EE90",
-  },
-  defeatTitle: {
-    color: "#FF6B6B",
-  },
-  gameEndMessage: {
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 20,
-    color: "#fff",
-    lineHeight: 22,
-  },
-  gameEndDetailsContainer: {
-    marginBottom: 16,
-  },
-  gameEndDetailText: {
-    color: "#999",
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 4,
-  },
-  promotionModal: {
-    backgroundColor: "#2c2c2c",
-    borderRadius: 12,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#555",
-  },
-  promotionTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 20,
-    textAlign: "center",
-  },
-  promotionOptions: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginBottom: 20,
-    flexWrap: "wrap",
-  },
-  promotionOption: {
-    margin: 8,
-    padding: 12,
-    backgroundColor: "#F0D9B5",
-    borderRadius: 8,
-    minWidth: 50,
-    minHeight: 50,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  promotionPiece: {
-    fontSize: 28,
-    textAlign: "center",
-    color: "#000",
-  },
-  cancelButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: "#666",
-    borderRadius: 8,
-  },
-  cancelButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  capturedPieces: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-start",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-    minHeight: 30, // Ensure some height even if no pieces
-  },
-  capturedPieceGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginRight: 8,
-    marginBottom: 4,
-  },
-  capturedPiece: {
-    fontSize: 30, // Adjust size as needed
-    color: "#fff", // White color for captured pieces
-    marginRight: 2,
-  },
-  capturedCount: {
-    fontSize: 12,
-    color: "#999", // Lighter color for count
-    fontWeight: "bold",
-  },
-})
