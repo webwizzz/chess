@@ -4,8 +4,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { Socket } from "socket.io-client";
 
-import SixPointerChessGame from '../(game)/variants/six-pointer';
 import { ClassicChess, CrazyHouseChess, DecayChess } from '../(game)/variants';
+import SixPointerChessGame from '../(game)/variants/six-pointer';
 import { getSocket } from '../../utils/socketManager';
 
 

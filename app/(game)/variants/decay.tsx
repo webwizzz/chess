@@ -1,11 +1,12 @@
 "use client"
 
-import { getSocketInstance } from "../../../utils/socketManager"
+import { getPieceComponent } from "@/app/components"
+import { getSocketInstance } from "@/utils/socketManager"
 import { useRouter } from "expo-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native"
 import type { Socket } from "socket.io-client"
-import { getPieceComponent } from "../../components/game/chessPieces"
+
 
 // Types
 interface Player {
@@ -156,38 +157,28 @@ const QUEEN_INITIAL_DECAY_TIME = 25000 // 25 seconds
 const MAJOR_PIECE_INITIAL_DECAY_TIME = 20000 // 20 seconds
 const DECAY_TIME_INCREMENT = 2000 // +2 seconds per additional move
 
-// Responsive sizing constants - Chess.com style like classic
+// Responsive sizing constants
 const screenWidth = Dimensions.get("window").width
 const screenHeight = Dimensions.get("window").height
 const isTablet = Math.min(screenWidth, screenHeight) > 600
 const isSmallScreen = screenWidth < 380
 const isVerySmallScreen = screenWidth < 320
 
-// Calculate optimal sizing to fit everything on screen
-const statusBarHeight = isSmallScreen ? 44 : isTablet ? 44 : 44
-const bottomBarHeight = isSmallScreen ? 60 : 65
-const topPadding = isSmallScreen ? 20 : isTablet ? 40 : 25
-const bottomPadding = 10
-
-// Available height for content (excluding status bar, padding, and bottom bar)
-const availableHeight = screenHeight - statusBarHeight - topPadding - bottomPadding - bottomBarHeight
-
-// Fixed component heights that fit on screen
-const playerInfoHeight = isSmallScreen ? 70 : isTablet ? 90 : 80  // Reduced to fit on screen
-const gameStatusHeight = isSmallScreen ? 0 : isTablet ? 0 : 0  // Removed height for seamless connection
-const totalComponentsHeight = (playerInfoHeight * 2) + gameStatusHeight
-
-// Chess.com style board sizing - full width like classic
-const boardSize = screenWidth
+// Improved responsive sizing for better centering
+const horizontalPadding = isSmallScreen ? 8 : isTablet ? 20 : 12
+const boardSize = screenWidth - horizontalPadding * 2
 const squareSize = boardSize / 8
 
-// Reduced spacing to maximize board size
-const verticalSpacing = isSmallScreen ? 4 : isTablet ? 8 : 6
-const componentSpacing = isSmallScreen ? 2 : isTablet ? 4 : 3 // Reduced spacing for tighter layout like classic
-
-// Other constants
-const decayTimerFontSize = isSmallScreen ? 7 : 9
+// Dynamic sizing based on screen size with better proportions
+const playerInfoHeight = isSmallScreen ? 70 : isTablet ? 100 : 85
+const gameStatusHeight = isSmallScreen ? 35 : 45
+const bottomBarHeight = isSmallScreen ? 65 : 75
+const decayTimerFontSize = isSmallScreen ? 8 : 10
 const pieceFontSize = squareSize * (isSmallScreen ? 0.6 : isTablet ? 0.7 : 0.65)
+
+// Improved spacing constants
+const verticalSpacing = isSmallScreen ? 8 : isTablet ? 16 : 12
+const componentSpacing = isSmallScreen ? 6 : isTablet ? 12 : 8
 
 // Format decay timer in MM:SS format
 const formatDecayTimeMinutes = (milliseconds: number): string => {
@@ -1485,7 +1476,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
   const renderGameInfo = useCallback(() => {
     const gs = gameState.gameState || {}
 
-    // Only show game ended message, hide turn indicators
+    // Check if game has ended
     if (gameState.status === "ended" || gs.gameEnded) {
       return (
         <View style={styles.gameStatusContainer}>
@@ -1494,9 +1485,12 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       )
     }
 
-    // Return empty view to maintain spacing but show nothing during active game
-    return <View style={styles.gameStatusContainer} />
-  }, [gameState.status, gameState.gameState])
+    // Show whose turn it is
+    const activePlayerName = gameState.players[gameState.board.activeColor]?.username || gameState.board.activeColor
+    const isMyTurnActive = gameState.board.activeColor === playerColor
+
+    return
+  }, [gameState.status, gameState.gameState, gameState.players, gameState.board.activeColor, playerColor])
 
   // FIXED: Render board with proper structure
   const renderBoard = useCallback(() => {
@@ -1504,15 +1498,13 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
     const ranks = boardFlipped ? [...RANKS].reverse() : RANKS
 
     return (
-      <View style={styles.boardWrapper}>
-        <View style={styles.boardContainer}>
-          <View style={styles.board}>
-            {ranks.map((rank) => (
-              <View key={rank} style={styles.row}>
-                {files.map((file) => renderSquare(file, rank))}
-              </View>
-            ))}
-          </View>
+      <View style={styles.boardContainer}>
+        <View style={styles.board}>
+          {ranks.map((rank) => (
+            <View key={rank} style={styles.row}>
+              {files.map((file) => renderSquare(file, rank))}
+            </View>
+          ))}
         </View>
       </View>
     )
@@ -1541,7 +1533,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
       const frozenPiecesCount = frozenPieces[color].size
 
       return (
-        <View style={styles.playerInfoContainer}>
+        <View style={[styles.playerInfoContainer, isActive && styles.activePlayerContainer]}>
           <View style={styles.playerHeader}>
             <View style={styles.playerDetails}>
               <View style={styles.playerNameRow}>
@@ -1549,7 +1541,7 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
                   <Text style={styles.playerAvatarText}>{player.username.charAt(0).toUpperCase()}</Text>
                 </View>
                 <View style={styles.playerNameContainer}>
-                  <Text style={styles.playerName} numberOfLines={1}>
+                  <Text style={[styles.playerName, isActive && styles.activePlayerName]} numberOfLines={1}>
                     {player.username}
                   </Text>
                   <Text style={styles.playerRating}>({player.rating > 0 ? player.rating : "Unrated"})</Text>
@@ -1564,8 +1556,8 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
                 </View>
               )}
             </View>
-            <View style={styles.timerContainer}>
-              <Text style={styles.timerText}>{formatTime(timer)}</Text>
+            <View style={[styles.timerContainer, isActive && styles.activeTimerContainer]}>
+              <Text style={[styles.timerText, isActive && styles.activeTimerText]}>{formatTime(timer)}</Text>
             </View>
           </View>
           {renderCapturedPieces(color)}
@@ -1633,22 +1625,17 @@ export default function DecayChessGame({ initialGameState, userId, onNavigateToM
 
   return (
     <View style={styles.container}>
-      <View style={styles.gameContent}>
-        {/* Top: Opponent Player - Equal space allocation */}
-        <View style={styles.topPlayerSection}>
-          {renderPlayerInfo(opponentColor)}
-        </View>
-        
-        {/* Chess Board - Equal space allocation */}
-        <View style={styles.boardSection}>
-          {renderBoard()}
-        </View>
-        
-        {/* Bottom: Current Player - Equal space allocation */}
-        <View style={styles.bottomPlayerSection}>
-          {renderPlayerInfo(playerColor)}
-        </View>
-      </View>
+      {/* Opponent Player (always at top) */}
+      {renderPlayerInfo(opponentColor)}
+
+      {/* Game Status */}
+      {renderGameInfo()}
+
+      {/* Chess Board - Centered */}
+      {renderBoard()}
+
+      {/* Current Player (always at bottom) */}
+      {renderPlayerInfo(playerColor)}
 
       {/* Bottom Control Bar */}
       <View style={styles.bottomBar}>
@@ -1754,42 +1741,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#312e2b", // Chess.com dark background
-    paddingTop: topPadding,
-    paddingBottom: bottomPadding,
-    paddingHorizontal: 0, // No horizontal padding for full width board like classic
-    justifyContent: "space-between", // Ensure consistent spacing between components
-  },
-  gameContent: {
-    flex: 1,
-    justifyContent: "space-between", // Changed from center to space-between for even distribution
-    alignItems: "center",
-  },
-  topPlayerSection: {
-    flex: 1,
-    width: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  boardSection: {
-    flex: 1,
-    width: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  bottomPlayerSection: {
-    flex: 1,
-    width: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  boardWrapper: {
-    justifyContent: "center",
-    alignItems: "center",
+    paddingTop: isSmallScreen ? 30 : isTablet ? 60 : 50,
+    paddingBottom: bottomBarHeight,
+    paddingHorizontal: horizontalPadding,
   },
   boardContainer: {
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 0, // Remove all margin for seamless connection
+    marginVertical: verticalSpacing,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    // Ensure the board is perfectly centered
+    alignSelf: "center",
   },
   board: {
     flexDirection: "column",
@@ -1811,18 +1777,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   playerInfoContainer: {
-    backgroundColor: "#312e2b",
-    borderRadius: 0, // Remove border radius for seamless connection to board
-    paddingHorizontal: isSmallScreen ? 8 : isTablet ? 16 : 12,
-    paddingVertical: isSmallScreen ? 6 : isTablet ? 10 : 8,
-    marginVertical: 20, // Remove all margin for seamless connection
-    height: playerInfoHeight, // Fixed height to prevent board shifting
-    width: "100%", // Full width to maintain consistent layout
-    justifyContent: "center",
+   
+    borderRadius: 2,
+    paddingHorizontal: isSmallScreen ? 12 : isTablet ? 20 : 16,
+    paddingVertical: isSmallScreen ? 10 : isTablet ? 16 : 12,
+    marginVertical: componentSpacing,
+
+
+    minHeight: playerInfoHeight,
+    // Improved shadow for better visual separation
+ 
+
+   
+  
   },
   activePlayerContainer: {
-    // Remove special styling - keep same appearance for all players
-    backgroundColor: "#3a3a3a",
+    backgroundColor: "#2d5a2d",
+    borderColor: "#4ade80",
+    borderWidth: 2,
+    shadowColor: "#4ade80",
+    shadowOpacity: 0.3,
   },
   playerHeader: {
     flexDirection: "row",
@@ -1836,20 +1810,20 @@ const styles = StyleSheet.create({
   playerNameRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: isSmallScreen ? 2 : 3,
+    marginBottom: isSmallScreen ? 4 : 6,
   },
   playerAvatar: {
-    width: isSmallScreen ? 24 : isTablet ? 36 : 30,
-    height: isSmallScreen ? 24 : isTablet ? 36 : 30,
-    borderRadius: isSmallScreen ? 12 : isTablet ? 18 : 15,
+    width: isSmallScreen ? 32 : isTablet ? 48 : 40,
+    height: isSmallScreen ? 32 : isTablet ? 48 : 40,
+    borderRadius: isSmallScreen ? 16 : isTablet ? 24 : 20,
     backgroundColor: "#4a4a4a",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: isSmallScreen ? 6 : isTablet ? 12 : 8,
+    marginRight: isSmallScreen ? 8 : isTablet ? 16 : 12,
   },
   playerAvatarText: {
     color: "#fff",
-    fontSize: isSmallScreen ? 10 : isTablet ? 16 : 12,
+    fontSize: isSmallScreen ? 14 : isTablet ? 20 : 16,
     fontWeight: "bold",
   },
   playerNameContainer: {
@@ -1858,64 +1832,69 @@ const styles = StyleSheet.create({
   },
   playerName: {
     color: "#fff",
-    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
+    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
     fontWeight: "600",
+  },
+  activePlayerName: {
+    color: "#4ade80",
   },
   playerRating: {
     color: "#a1a1aa",
-    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
-    marginTop: 1,
+    fontSize: isSmallScreen ? 12 : isTablet ? 16 : 14,
+    marginTop: 2,
   },
   youIndicator: {
     color: "#60a5fa",
-    fontSize: isSmallScreen ? 8 : isTablet ? 12 : 10,
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
     fontWeight: "500",
     backgroundColor: "#1e3a8a",
-    paddingHorizontal: isSmallScreen ? 4 : 6,
-    paddingVertical: 1,
-    borderRadius: 8,
+    paddingHorizontal: isSmallScreen ? 6 : 8,
+    paddingVertical: 2,
+    borderRadius: 10,
   },
   decayStatus: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    maxHeight: isSmallScreen ? 12 : isTablet ? 16 : 14, // Reduced height to fit better
-    overflow: "hidden",
   },
   decayStatusText: {
     color: "#f97316",
-    fontSize: isSmallScreen ? 8 : isTablet ? 12 : 10,
-    marginRight: 8,
-    marginTop: 1,
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
+    marginRight: 12,
+    marginTop: 2,
   },
   frozenStatusText: {
     color: "#ef4444",
-    fontSize: isSmallScreen ? 8 : isTablet ? 12 : 10,
-    marginTop: 1,
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
+    marginTop: 2,
   },
   timerContainer: {
     backgroundColor: "#1a1a1a",
-    paddingHorizontal: isSmallScreen ? 8 : isTablet ? 14 : 10,
-    paddingVertical: isSmallScreen ? 4 : isTablet ? 8 : 6,
-    borderRadius: 16,
-    minWidth: isSmallScreen ? 50 : isTablet ? 80 : 60,
+    paddingHorizontal: isSmallScreen ? 12 : isTablet ? 20 : 16,
+    paddingVertical: isSmallScreen ? 8 : isTablet ? 12 : 10,
+    borderRadius: 20,
+    minWidth: isSmallScreen ? 70 : isTablet ? 100 : 80,
     alignItems: "center",
+  },
+  activeTimerContainer: {
+    backgroundColor: "#fff",
   },
   timerText: {
     color: "#fff",
-    fontSize: isSmallScreen ? 12 : isTablet ? 18 : 14,
+    fontSize: isSmallScreen ? 16 : isTablet ? 22 : 18,
     fontWeight: "bold",
     fontFamily: "monospace",
+  },
+  activeTimerText: {
+    color: "#000",
   },
   capturedPieces: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: isSmallScreen ? 1 : isTablet ? 2 : 1, // Reduced top margin for tighter connection
-    paddingTop: isSmallScreen ? 1 : isTablet ? 2 : 1, // Reduced top padding for tighter connection
+    marginTop: isSmallScreen ? 8 : isTablet ? 16 : 12,
+    paddingTop: isSmallScreen ? 6 : isTablet ? 12 : 8,
     borderTopWidth: 1,
-    borderTopColor: "#4a4a4a", // Slightly lighter border to match board
-    maxHeight: isSmallScreen ? 18 : isTablet ? 25 : 20, // Reduced height to fit better
-    overflow: "hidden", // Hide overflow to prevent container expansion
+    borderTopColor: "#3a3a3a",
   },
   capturedPieceGroup: {
     flexDirection: "row",
@@ -1931,21 +1910,20 @@ const styles = StyleSheet.create({
   },
   gameStatusContainer: {
     alignItems: "center",
-    marginVertical: 0, // Remove margin for seamless connection
+    marginVertical: componentSpacing,
     paddingHorizontal: 16,
-    height: gameStatusHeight, // Fixed height to prevent board shifting
-    width: "100%", // Full width to maintain consistent layout
+    minHeight: gameStatusHeight,
     justifyContent: "center",
   },
   gameOverText: {
     color: "#ef4444",
-    fontSize: isSmallScreen ? 12 : isTablet ? 18 : 14,
+    fontSize: isSmallScreen ? 16 : isTablet ? 22 : 18,
     fontWeight: "bold",
   },
   turnIndicator: {
     color: "#a1a1aa",
-    fontSize: isSmallScreen ? 11 : isTablet ? 15 : 13,
-    marginBottom: 2,
+    fontSize: isSmallScreen ? 14 : isTablet ? 18 : 16,
+    marginBottom: 4,
     textAlign: "center",
   },
   myTurnIndicator: {
@@ -1967,26 +1945,26 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     alignItems: "center",
     backgroundColor: "#1a1a1a",
-    paddingVertical: isSmallScreen ? 6 : isTablet ? 10 : 8,
-    paddingHorizontal: 16, // Fixed padding instead of variable
+    paddingVertical: isSmallScreen ? 10 : isTablet ? 16 : 12,
+    paddingHorizontal: horizontalPadding,
     borderTopWidth: 1,
     borderTopColor: "#3a3a3a",
     height: bottomBarHeight,
   },
   bottomBarButton: {
     alignItems: "center",
-    paddingVertical: 4,
-    paddingHorizontal: isSmallScreen ? 6 : isTablet ? 12 : 8,
-    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: isSmallScreen ? 8 : isTablet ? 16 : 12,
+    borderRadius: 8,
     flex: 1,
   },
   bottomBarIcon: {
-    fontSize: isSmallScreen ? 14 : isTablet ? 20 : 16,
+    fontSize: isSmallScreen ? 18 : isTablet ? 24 : 20,
     color: "#fff",
-    marginBottom: 2,
+    marginBottom: 4,
   },
   bottomBarLabel: {
-    fontSize: isSmallScreen ? 8 : isTablet ? 12 : 10,
+    fontSize: isSmallScreen ? 10 : isTablet ? 14 : 12,
     color: "#a1a1aa",
     fontWeight: "500",
   },
